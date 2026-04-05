@@ -11,7 +11,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from bot_training.features.build_features import INPUT_COLUMNS  # noqa: E402
+from bot_training.features.build_features import INPUT_COLUMNS, ITEM_SLOT_COLUMNS  # noqa: E402
 from bot_training.models.pvp_sequence_model import PvPSequenceModel  # noqa: E402
 from bot_training.training.phase4 import (  # noqa: E402
     SequenceDataset,
@@ -27,6 +27,7 @@ from bot_training.training.phase4 import (  # noqa: E402
 )
 
 FEATURE_COUNT = len(INPUT_COLUMNS)
+CATEGORICAL_FEATURE_COUNT = len(ITEM_SLOT_COLUMNS)
 BOOLEAN_ACTION_COUNT = 9
 WINDOW_SIZE = 5
 
@@ -34,6 +35,12 @@ WINDOW_SIZE = 5
 def _make_synthetic_dataset(sample_count: int = 96, seed: int = 7) -> SequenceDataset:
     rng = np.random.default_rng(seed)
     windows = rng.normal(size=(sample_count, WINDOW_SIZE, FEATURE_COUNT)).astype(np.float32)
+    categorical_windows = rng.integers(
+        low=0,
+        high=32,
+        size=(sample_count, WINDOW_SIZE, CATEGORICAL_FEATURE_COUNT),
+        dtype=np.int32,
+    )
     last = windows[:, -1, :]
 
     binary_targets = np.zeros((sample_count, BOOLEAN_ACTION_COUNT), dtype=np.float32)
@@ -47,7 +54,7 @@ def _make_synthetic_dataset(sample_count: int = 96, seed: int = 7) -> SequenceDa
     continuous_targets = np.stack([last[:, 11] * 0.4, last[:, 12] * 0.6], axis=1).astype(np.float32)
 
     match_ids = np.asarray([f"match_{i // 8}" for i in range(sample_count)], dtype=object)
-    return SequenceDataset(windows, binary_targets, slot_targets, continuous_targets, match_ids)
+    return SequenceDataset(windows, categorical_windows, binary_targets, slot_targets, continuous_targets, match_ids)
 
 
 def _make_model() -> PvPSequenceModel:
@@ -117,10 +124,16 @@ def test_gradient_updates_reduce_loss_on_a_single_batch() -> None:
     model = _make_model()
     optimizer = optim.Adam(learning_rate=0.001)
 
-    initial_loss = total_loss(predict_mechanics(model, dataset.inputs), _dataset_targets(dataset))
+    initial_loss = total_loss(
+        predict_mechanics(model, dataset.inputs, dataset.categorical_inputs),
+        _dataset_targets(dataset),
+    )
     for _ in range(50):
         train_on_batch(model, optimizer, dataset)
-    final_loss = total_loss(predict_mechanics(model, dataset.inputs), _dataset_targets(dataset))
+    final_loss = total_loss(
+        predict_mechanics(model, dataset.inputs, dataset.categorical_inputs),
+        _dataset_targets(dataset),
+    )
 
     assert final_loss < initial_loss
 
@@ -129,7 +142,7 @@ def test_predict_mechanics_returns_expected_head_shapes() -> None:
     dataset = _make_synthetic_dataset(sample_count=12)
     model = _make_model()
 
-    outputs = predict_mechanics(model, dataset.inputs[:4])
+    outputs = predict_mechanics(model, dataset.inputs[:4], dataset.categorical_inputs[:4])
 
     assert outputs["binary_probabilities"].shape == (4, BOOLEAN_ACTION_COUNT)
     assert outputs["slot_probabilities"].shape == (4, 9)
@@ -156,4 +169,3 @@ def test_training_loop_emits_per_epoch_log(capsys) -> None:
     assert "train_loss=" in captured
     assert "val_loss=" in captured
     assert "best_val_loss=" in captured
-

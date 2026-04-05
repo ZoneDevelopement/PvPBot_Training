@@ -22,6 +22,7 @@ CONTINUOUS_COUNT = 2
 @dataclass(slots=True)
 class SequenceDataset:
     inputs: np.ndarray
+    categorical_inputs: np.ndarray
     binary_targets: np.ndarray
     slot_targets: np.ndarray
     continuous_targets: np.ndarray
@@ -56,6 +57,7 @@ def load_phase2_dataset(npz_path: Path | str) -> SequenceDataset:
 def _load_single_phase2_file(npz_path: Path) -> SequenceDataset:
     with np.load(npz_path, allow_pickle=True) as data:
         inputs = np.asarray(data["input_windows"], dtype=np.float32)
+        categorical_inputs = np.asarray(data["categorical_windows"], dtype=np.int32)
         targets = np.asarray(data["sequence_targets"], dtype=np.float32)
         if "window_match_ids" in data.files:
             match_ids = np.asarray(data["window_match_ids"], dtype=object)
@@ -63,12 +65,13 @@ def _load_single_phase2_file(npz_path: Path) -> SequenceDataset:
             match_ids = np.asarray([f"window_{index}" for index in range(inputs.shape[0])], dtype=object)
 
     namespaced_match_ids = np.asarray([f"{npz_path.stem}:{match_id}" for match_id in match_ids], dtype=object)
-    return _split_flat_targets(inputs, targets, namespaced_match_ids)
+    return _split_flat_targets(inputs, categorical_inputs, targets, namespaced_match_ids)
 
 
 def _concatenate_datasets(datasets: list[SequenceDataset]) -> SequenceDataset:
     return SequenceDataset(
         inputs=np.concatenate([dataset.inputs for dataset in datasets], axis=0),
+        categorical_inputs=np.concatenate([dataset.categorical_inputs for dataset in datasets], axis=0),
         binary_targets=np.concatenate([dataset.binary_targets for dataset in datasets], axis=0),
         slot_targets=np.concatenate([dataset.slot_targets for dataset in datasets], axis=0),
         continuous_targets=np.concatenate([dataset.continuous_targets for dataset in datasets], axis=0),
@@ -78,6 +81,7 @@ def _concatenate_datasets(datasets: list[SequenceDataset]) -> SequenceDataset:
 
 def _split_flat_targets(
     inputs: np.ndarray,
+    categorical_inputs: np.ndarray,
     flat_targets: np.ndarray,
     match_ids: np.ndarray,
 ) -> SequenceDataset:
@@ -86,6 +90,7 @@ def _split_flat_targets(
     continuous_targets = flat_targets[:, -CONTINUOUS_COUNT:].astype(np.float32, copy=False)
     return SequenceDataset(
         inputs=inputs.astype(np.float32, copy=False),
+        categorical_inputs=categorical_inputs.astype(np.int32, copy=False),
         binary_targets=binary_targets,
         slot_targets=slot_targets,
         continuous_targets=continuous_targets,
@@ -129,6 +134,7 @@ def split_dataset_by_match(
 def _take_indices(dataset: SequenceDataset, indices: np.ndarray) -> SequenceDataset:
     return SequenceDataset(
         inputs=dataset.inputs[indices],
+        categorical_inputs=dataset.categorical_inputs[indices],
         binary_targets=dataset.binary_targets[indices],
         slot_targets=dataset.slot_targets[indices],
         continuous_targets=dataset.continuous_targets[indices],
@@ -196,14 +202,27 @@ def total_loss(outputs: dict[str, np.ndarray], targets: dict[str, np.ndarray]) -
     )
 
 
+def _model_forward(
+    model: PvPSequenceModel,
+    continuous_inputs: mx.array,
+    categorical_inputs: mx.array,
+) -> dict[str, mx.array]:
+    # Backward-compatible call path while preferring the new dual-input signature.
+    try:
+        return model(continuous_inputs, categorical_inputs)
+    except TypeError:
+        return model(continuous_inputs)
+
+
 def _mx_total_loss(
     model: PvPSequenceModel,
-    inputs: mx.array,
+    continuous_inputs: mx.array,
+    categorical_inputs: mx.array,
     binary_targets: mx.array,
     slot_targets: mx.array,
     continuous_targets: mx.array,
 ) -> mx.array:
-    outputs = model(inputs)
+    outputs = _model_forward(model, continuous_inputs, categorical_inputs)
 
     epsilon = 1e-7
     binary_probs = mx.clip(outputs["binary_probabilities"], epsilon, 1.0 - epsilon)
@@ -220,9 +239,10 @@ def _mx_total_loss(
     return bce + ce + mse
 
 
-def _to_mx_batch(batch: SequenceDataset) -> tuple[mx.array, mx.array, mx.array, mx.array]:
+def _to_mx_batch(batch: SequenceDataset) -> tuple[mx.array, mx.array, mx.array, mx.array, mx.array]:
     return (
         mx.array(batch.inputs, dtype=mx.float32),
+        mx.array(batch.categorical_inputs, dtype=mx.int32),
         mx.array(batch.binary_targets, dtype=mx.float32),
         mx.array(batch.slot_targets, dtype=mx.int32),
         mx.array(batch.continuous_targets, dtype=mx.float32),
@@ -248,8 +268,15 @@ def train_on_batch(
     if loss_and_grad_fn is None:
         loss_and_grad_fn = nn.value_and_grad(model, _mx_total_loss)
 
-    inputs, binary_targets, slot_targets, continuous_targets = _to_mx_batch(batch)
-    loss, grads = loss_and_grad_fn(model, inputs, binary_targets, slot_targets, continuous_targets)
+    continuous_inputs, categorical_inputs, binary_targets, slot_targets, continuous_targets = _to_mx_batch(batch)
+    loss, grads = loss_and_grad_fn(
+        model,
+        continuous_inputs,
+        categorical_inputs,
+        binary_targets,
+        slot_targets,
+        continuous_targets,
+    )
     optimizer.update(model, grads)
     mx.eval(model.parameters(), optimizer.state)
     return float(loss)
@@ -310,15 +337,35 @@ def evaluate_phase4_model(model: PvPSequenceModel, dataset: SequenceDataset, bat
 
     losses: list[float] = []
     for batch in iter_batches(dataset, batch_size=batch_size, shuffle=False):
-        inputs, binary_targets, slot_targets, continuous_targets = _to_mx_batch(batch)
-        loss = _mx_total_loss(model, inputs, binary_targets, slot_targets, continuous_targets)
+        continuous_inputs, categorical_inputs, binary_targets, slot_targets, continuous_targets = _to_mx_batch(batch)
+        loss = _mx_total_loss(
+            model,
+            continuous_inputs,
+            categorical_inputs,
+            binary_targets,
+            slot_targets,
+            continuous_targets,
+        )
         losses.append(float(loss))
 
     return float(np.mean(losses))
 
 
-def predict_mechanics(model: PvPSequenceModel, inputs: np.ndarray) -> dict[str, mx.array]:
-    sample_inputs = np.asarray(inputs, dtype=np.float32)
-    if sample_inputs.ndim == 2:
-        sample_inputs = np.expand_dims(sample_inputs, axis=0)
-    return model(mx.array(sample_inputs, dtype=mx.float32))
+def predict_mechanics(
+    model: PvPSequenceModel,
+    continuous_inputs: np.ndarray,
+    categorical_inputs: np.ndarray,
+) -> dict[str, mx.array]:
+    sample_continuous_inputs = np.asarray(continuous_inputs, dtype=np.float32)
+    sample_categorical_inputs = np.asarray(categorical_inputs, dtype=np.int32)
+
+    if sample_continuous_inputs.ndim == 2:
+        sample_continuous_inputs = np.expand_dims(sample_continuous_inputs, axis=0)
+    if sample_categorical_inputs.ndim == 2:
+        sample_categorical_inputs = np.expand_dims(sample_categorical_inputs, axis=0)
+
+    return _model_forward(
+        model,
+        mx.array(sample_continuous_inputs, dtype=mx.float32),
+        mx.array(sample_categorical_inputs, dtype=mx.int32),
+    )

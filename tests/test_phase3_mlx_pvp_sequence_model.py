@@ -11,13 +11,14 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import mlx.core as mx  # noqa: E402
-from bot_training.features.build_features import INPUT_COLUMNS  # noqa: E402
+from bot_training.features.build_features import INPUT_COLUMNS, ITEM_SLOT_COLUMNS  # noqa: E402
 from bot_training.models.pvp_sequence_model import PvPSequenceModel  # noqa: E402
 
 
 BATCH_SIZE = 2
 WINDOW_SIZE = 6
 FEATURE_COUNT = len(INPUT_COLUMNS)
+CATEGORICAL_SLOT_COUNT = len(ITEM_SLOT_COLUMNS)
 BOOLEAN_ACTION_COUNT = 9
 
 
@@ -37,6 +38,16 @@ def _make_inputs() -> np.ndarray:
     )
 
 
+def _make_categorical_inputs() -> np.ndarray:
+    values = np.random.default_rng(11).integers(
+        low=0,
+        high=128,
+        size=(BATCH_SIZE, WINDOW_SIZE, CATEGORICAL_SLOT_COUNT),
+        dtype=np.int32,
+    )
+    return mx.array(values, dtype=mx.int32)
+
+
 def test_model_initialization() -> None:
     model = _make_model()
 
@@ -45,7 +56,7 @@ def test_model_initialization() -> None:
 
 def test_forward_pass_returns_outputs() -> None:
     model = _make_model()
-    outputs = model(_make_inputs())
+    outputs = model(_make_inputs(), _make_categorical_inputs())
 
     assert outputs["binary_probabilities"] is not None
     assert outputs["slot_probabilities"] is not None
@@ -54,7 +65,7 @@ def test_forward_pass_returns_outputs() -> None:
 
 def test_output_shapes_match_requested_heads() -> None:
     model = _make_model()
-    outputs = model(_make_inputs())
+    outputs = model(_make_inputs(), _make_categorical_inputs())
 
     assert outputs["binary_probabilities"].shape == (BATCH_SIZE, BOOLEAN_ACTION_COUNT)
     assert outputs["slot_probabilities"].shape == (BATCH_SIZE, 9)
@@ -84,3 +95,13 @@ def test_model_compiles_and_executes() -> None:
     assert outputs["slot_probabilities"].shape == (BATCH_SIZE, 9)
     assert outputs["continuous_deltas"].shape == (BATCH_SIZE, 2)
 
+
+def test_model_accepts_compiled_dual_input_forward() -> None:
+    model = _make_model()
+
+    compiled_forward = mx.compile(lambda inputs, categorical: model(inputs, categorical))
+    outputs = compiled_forward(_make_inputs(), _make_categorical_inputs())
+
+    assert outputs["binary_probabilities"].shape == (BATCH_SIZE, BOOLEAN_ACTION_COUNT)
+    assert outputs["slot_probabilities"].shape == (BATCH_SIZE, 9)
+    assert outputs["continuous_deltas"].shape == (BATCH_SIZE, 2)
