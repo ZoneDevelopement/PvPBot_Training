@@ -1,0 +1,12 @@
+test_alternating_players_do_not_create_one_row_matches_and_skip_empty_output (tests.test_phase1_preprocessing.Phase1PreprocessingTest.test_alternating_players_do_not_create_one_row_matches_and_skip_empty_output) ... ok
+test_keeps_only_matches_passing_all_filters (tests.test_phase1_preprocessing.Phase1PreprocessingTest.test_keeps_only_matches_passing_all_filters) ... ok
+test_compute_quality_score (tests.test_phase1_threshold_sweep.Phase1ThresholdSweepTest.test_compute_quality_score) ... ok
+test_parse_numeric_grid (tests.test_phase1_threshold_sweep.Phase1ThresholdSweepTest.test_parse_numeric_grid) ... ok
+test_parse_score_weights (tests.test_phase1_threshold_sweep.Phase1ThresholdSweepTest.test_parse_score_weights) ... ok
+test_report_rows_include_expected_fields (tests.test_phase1_threshold_sweep.Phase1ThresholdSweepTest.test_report_rows_include_expected_fields) ... ok
+test_sample_csv_files_deterministic_fraction (tests.test_phase1_threshold_sweep.Phase1ThresholdSweepTest.test_sample_csv_files_deterministic_fraction) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.016s
+
+OK
