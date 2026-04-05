@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
         default=CHECKPOINTS_DIR / "phase4_best_weights.npz",
         help="Path where the best weights should be saved.",
     )
-    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--epochs", type=int, default=50, help="Maximum epochs to train (capped at 50).")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=0.001)
     parser.add_argument("--validation-ratio", type=float, default=0.2)

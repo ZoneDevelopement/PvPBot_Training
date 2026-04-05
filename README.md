@@ -85,11 +85,17 @@ Use `--sample-fraction 0.1` to run on roughly 1/10 of files for faster iteration
 
 Convert cleaned phase 1 rows into normalized frame tensors and sequence windows. Phase 2 now writes one NPZ per cleaned match CSV under `data/processed/phase2_feature_tensors_per_file/`:
 
+Continuous features use fixed Minecraft-aware scaling (no fitted scaler artifact):
+- `health`, `targetHealth` / 20
+- `yaw`, `targetYaw` / 180
+- `pitch`, `targetPitch` / 90
+- spatial terms / 50 (upper-clipped to `1.0`)
+- velocity terms / 4 (upper-clipped to `1.0`)
+
 ```bash
 python scripts/build_features.py \
   --input-file data/processed/phase1_clean_matches_per_file/example_ai_clean.csv \
   --output-file data/processed/phase2_feature_tensors.npz \
-  --scaler-file models/exports/phase2_minmax_scaler.joblib \
   --vocabulary-file models/exports/phase2_item_vocabulary.json
 ```
 
@@ -100,7 +106,6 @@ python3 scripts/build_features.py \
   --input-dir data/processed/phase1_clean_matches_per_file \
   --input-pattern "*_clean.csv" \
   --output-dir data/processed/phase2_feature_tensors_per_file \
-  --scaler-dir models/exports/phase2_scalers_per_file \
   --manifest-file data/processed/phase2_feature_manifest.json \
   --vocabulary-file models/exports/phase2_item_vocabulary.json \
   --window-size 20

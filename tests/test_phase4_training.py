@@ -13,6 +13,7 @@ if str(SRC) not in sys.path:
 
 from bot_training.features.build_features import INPUT_COLUMNS  # noqa: E402
 from bot_training.models.pvp_sequence_model import PvPSequenceModel  # noqa: E402
+from bot_training.training import phase4 as phase4_module  # noqa: E402
 from bot_training.training.phase4 import (  # noqa: E402
     SequenceDataset,
     binary_cross_entropy,
@@ -164,3 +165,70 @@ def test_training_loop_emits_per_epoch_log(capsys) -> None:
     assert "train_loss=" in captured
     assert "val_loss=" in captured
     assert "best_val_loss=" in captured
+
+
+def test_training_loop_early_stops_on_validation_plateau(monkeypatch, tmp_path, capsys) -> None:
+    dataset = _make_synthetic_dataset(sample_count=64)
+    model = _make_model()
+    call_count = {"value": 0}
+
+    def validation_loss(*args, **kwargs) -> float:
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            return 1.0
+        if call_count["value"] == 2:
+            return 0.9
+        return 0.93
+
+    monkeypatch.setattr(phase4_module, "train_on_batch", lambda *args, **kwargs: 0.5)
+    monkeypatch.setattr(phase4_module, "evaluate_phase4_model", validation_loss)
+
+    checkpoint_path = tmp_path / "phase4_best_weights.npz"
+    result = train_phase4_model(
+        dataset,
+        model,
+        epochs=50,
+        batch_size=64,
+        learning_rate=0.001,
+        validation_ratio=0.2,
+        seed=19,
+        checkpoint_path=checkpoint_path,
+    )
+
+    captured = capsys.readouterr().out
+    assert result.epochs_ran == 17
+    assert "Early stopping triggered after 17 epochs" in captured
+    assert checkpoint_path.exists()
+
+
+def test_training_loop_caps_requested_epochs_at_fifty(monkeypatch, tmp_path, capsys) -> None:
+    dataset = _make_synthetic_dataset(sample_count=64)
+    model = _make_model()
+
+    call_count = {"value": 0}
+
+    def validation_loss(*args, **kwargs) -> float:
+        call_count["value"] += 1
+        return 1.0 - 0.01 * min(call_count["value"] - 1, 49)
+
+    monkeypatch.setattr(phase4_module, "train_on_batch", lambda *args, **kwargs: 0.5)
+    monkeypatch.setattr(phase4_module, "evaluate_phase4_model", validation_loss)
+
+    checkpoint_path = tmp_path / "phase4_best_weights.npz"
+    result = train_phase4_model(
+        dataset,
+        model,
+        epochs=100,
+        batch_size=64,
+        learning_rate=0.001,
+        validation_ratio=0.2,
+        seed=19,
+        checkpoint_path=checkpoint_path,
+    )
+
+    captured = capsys.readouterr().out
+    assert result.epochs_ran == 50
+    assert "Epoch 50/50" in captured
+    assert checkpoint_path.exists()
+
+

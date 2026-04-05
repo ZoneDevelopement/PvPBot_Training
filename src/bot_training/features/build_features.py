@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 from ast import literal_eval
 from dataclasses import dataclass
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
 
 INPUT_COLUMNS: tuple[str, ...] = (
     "health",
@@ -60,8 +59,33 @@ CONTINUOUS_INPUT_COLUMNS: tuple[str, ...] = tuple(col for col in INPUT_COLUMNS i
 DELTA_COLUMNS: tuple[str, ...] = ("deltaYaw", "deltaPitch")
 TARGET_COLUMNS: tuple[str, ...] = ACTION_COLUMNS + (SLOT_COLUMN,) + DELTA_COLUMNS
 
+HEALTH_COLUMNS: tuple[str, ...] = ("health", "targetHealth")
+YAW_COLUMNS: tuple[str, ...] = ("yaw", "targetYaw")
+PITCH_COLUMNS: tuple[str, ...] = ("pitch", "targetPitch")
+SPATIAL_COLUMNS: tuple[str, ...] = (
+    "posX",
+    "posY",
+    "posZ",
+    "targetDistance",
+    "targetRelX",
+    "targetRelY",
+    "targetRelZ",
+)
+VELOCITY_COLUMNS: tuple[str, ...] = (
+    "velX",
+    "velY",
+    "velZ",
+    "targetVelX",
+    "targetVelY",
+    "targetVelZ",
+)
+
 _TRUE_VALUES = {"true", "1", "t", "yes", "y"}
 _EMPTY_ITEM_VALUES = {"", "air", "none", "null", "nan"}
+UNKNOWN_ITEM_TOKEN: str = "UNKNOWN"
+
+_LEADING_SLOT_PREFIX_PATTERN = re.compile(r"^\s*\d+\s*=\s*")
+_TRAILING_QUANTITY_PATTERN = re.compile(r"\s*[xX]\d+\s*$")
 
 MAIN_HAND_COLUMN: str = "mainHandItem"
 OFF_HAND_COLUMN: str = "offHandItem"
@@ -78,7 +102,7 @@ ITEM_SLOT_COLUMNS: tuple[str, ...] = DIRECT_ITEM_COLUMNS + INVENTORY_BAG_SLOT_CO
 
 @dataclass(slots=True)
 class FeatureEngineeringResult:
-    """Container for model-ready arrays and fitted scaler."""
+    """Container for model-ready arrays."""
 
     inputs: np.ndarray
     categorical_inputs: np.ndarray
@@ -88,7 +112,6 @@ class FeatureEngineeringResult:
     sequence_targets: np.ndarray
     window_match_ids: np.ndarray
     item_vocabulary: dict[str, int]
-    scaler: MinMaxScaler
 
 
 def _require_columns(dataframe: pd.DataFrame, columns: tuple[str, ...]) -> None:
@@ -188,6 +211,8 @@ def _normalize_item_name(value: object) -> str:
     if value is None or pd.isna(value):
         return ""
     normalized = str(value).strip()
+    normalized = _LEADING_SLOT_PREFIX_PATTERN.sub("", normalized)
+    normalized = _TRAILING_QUANTITY_PATTERN.sub("", normalized).strip()
     if normalized.lower() in _EMPTY_ITEM_VALUES:
         return ""
     return normalized
@@ -251,12 +276,18 @@ def extract_categorical_item_slots(dataframe: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_item_vocabulary(categorical_slots: pd.DataFrame) -> dict[str, int]:
-    """Create a stable item vocabulary where empty slots always map to id 0."""
+    """Create a stable item vocabulary with reserved EMPTY/UNKNOWN identifiers."""
     if tuple(categorical_slots.columns) != ITEM_SLOT_COLUMNS:
         categorical_slots = categorical_slots.loc[:, ITEM_SLOT_COLUMNS]
-    unique_items = sorted({item for item in categorical_slots.to_numpy().ravel() if item})
-    vocabulary: dict[str, int] = {"": 0}
-    vocabulary.update({item: idx for idx, item in enumerate(unique_items, start=1)})
+    unique_items = sorted(
+        {
+            item
+            for item in categorical_slots.to_numpy().ravel()
+            if item and item != UNKNOWN_ITEM_TOKEN
+        }
+    )
+    vocabulary: dict[str, int] = {"": 0, UNKNOWN_ITEM_TOKEN: 1}
+    vocabulary.update({item: idx for idx, item in enumerate(unique_items, start=2)})
     return vocabulary
 
 
@@ -269,7 +300,9 @@ def apply_item_vocabulary(categorical_slots: pd.DataFrame, vocabulary: dict[str,
     """Map 38 categorical item slots to integer ids."""
     if tuple(categorical_slots.columns) != ITEM_SLOT_COLUMNS:
         categorical_slots = categorical_slots.loc[:, ITEM_SLOT_COLUMNS]
-    encoded = categorical_slots.fillna("").replace(vocabulary)
+    unknown_id = vocabulary.get(UNKNOWN_ITEM_TOKEN, 1)
+    normalized = categorical_slots.fillna("").astype("string")
+    encoded = normalized.apply(lambda column: column.map(vocabulary).fillna(unknown_id).astype(np.int32))
     return encoded.to_numpy(dtype=np.int32)
 
 
@@ -324,15 +357,21 @@ def _build_match_aware_windows(
     )
 
 
-def fit_transform_inputs(inputs: pd.DataFrame, scaler_path: Path | None = None) -> tuple[np.ndarray, MinMaxScaler]:
-    """Fit MinMaxScaler on continuous inputs and return normalized array."""
-    scaler = MinMaxScaler()
+def normalize_continuous_inputs(inputs: pd.DataFrame) -> pd.DataFrame:
+    """Apply deterministic Minecraft-aware scaling to continuous features."""
     normalized = inputs.copy().astype(np.float32)
-    normalized.loc[:, CONTINUOUS_INPUT_COLUMNS] = scaler.fit_transform(normalized.loc[:, CONTINUOUS_INPUT_COLUMNS])
-    if scaler_path is not None:
-        scaler_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(scaler, scaler_path)
-    return normalized.to_numpy(dtype=np.float32), scaler
+    normalized.loc[:, HEALTH_COLUMNS] = normalized.loc[:, HEALTH_COLUMNS] / 20.0
+    normalized.loc[:, YAW_COLUMNS] = normalized.loc[:, YAW_COLUMNS] / 180.0
+    normalized.loc[:, PITCH_COLUMNS] = normalized.loc[:, PITCH_COLUMNS] / 90.0
+    normalized.loc[:, SPATIAL_COLUMNS] = np.minimum(normalized.loc[:, SPATIAL_COLUMNS] / 50.0, 1.0)
+    normalized.loc[:, VELOCITY_COLUMNS] = np.minimum(normalized.loc[:, VELOCITY_COLUMNS] / 4.0, 1.0)
+    return normalized
+
+
+def fit_transform_inputs(inputs: pd.DataFrame) -> np.ndarray:
+    """Scale inputs with fixed bounds and return the normalized array."""
+    normalized = normalize_continuous_inputs(inputs)
+    return normalized.to_numpy(dtype=np.float32)
 
 
 def generate_sliding_windows(array: np.ndarray, window_size: int = 20) -> np.ndarray:
@@ -351,16 +390,16 @@ def generate_sliding_windows(array: np.ndarray, window_size: int = 20) -> np.nda
 def engineer_feature_tensors(
     dataframe: pd.DataFrame,
     window_size: int = 20,
-    scaler_path: Path | None = None,
     vocabulary_path: Path | None = None,
+    item_vocabulary: dict[str, int] | None = None,
 ) -> FeatureEngineeringResult:
     """Full pipeline from filtered dataframe to model-ready sequence tensors."""
     inputs = extract_input_features(dataframe)
     categorical_slots = extract_categorical_item_slots(dataframe)
-    item_vocabulary = build_item_vocabulary(categorical_slots)
+    resolved_vocabulary = item_vocabulary if item_vocabulary is not None else build_item_vocabulary(categorical_slots)
     if vocabulary_path is not None:
-        save_item_vocabulary(item_vocabulary, vocabulary_path)
-    categorical_inputs = apply_item_vocabulary(categorical_slots, item_vocabulary)
+        save_item_vocabulary(resolved_vocabulary, vocabulary_path)
+    categorical_inputs = apply_item_vocabulary(categorical_slots, resolved_vocabulary)
 
     targets = build_targets_with_deltas(dataframe)
     aligned_inputs, aligned_targets = align_next_frame_rows(inputs, targets)
@@ -371,7 +410,7 @@ def engineer_feature_tensors(
         columns=ITEM_SLOT_COLUMNS,
     ).loc[valid_mask].reset_index(drop=True)
 
-    normalized_inputs, scaler = fit_transform_inputs(aligned_inputs, scaler_path=scaler_path)
+    normalized_inputs = fit_transform_inputs(aligned_inputs)
     target_array = aligned_targets.to_numpy(dtype=np.float32)
     input_windows, categorical_windows, sequence_targets, window_match_ids = _build_match_aware_windows(
         pd.DataFrame(normalized_inputs, columns=aligned_inputs.columns),
@@ -389,7 +428,6 @@ def engineer_feature_tensors(
         categorical_windows=categorical_windows,
         sequence_targets=sequence_targets,
         window_match_ids=window_match_ids,
-        item_vocabulary=item_vocabulary,
-        scaler=scaler,
+        item_vocabulary=resolved_vocabulary,
     )
 

@@ -5,20 +5,19 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
-import joblib
 import numpy as np
 import pandas as pd
 import mlx.core as mx
 
 import _bootstrap  # noqa: F401
 
-from bot_training.config import CHECKPOINTS_DIR, EXPORTS_DIR
+from bot_training.config import CHECKPOINTS_DIR
 from bot_training.features.build_features import (
     BINARY_ACTION_COLUMNS,
-    CONTINUOUS_INPUT_COLUMNS,
     INPUT_COLUMNS,
+    normalize_continuous_inputs,
 )
 from bot_training.models.pvp_sequence_model import PvPSequenceModel
 
@@ -34,9 +33,8 @@ class ScenarioResult:
 
 
 class ScenarioRunner:
-    def __init__(self, model: PvPSequenceModel, scaler: Any | None, args: argparse.Namespace) -> None:
+    def __init__(self, model: PvPSequenceModel, args: argparse.Namespace) -> None:
         self.model = model
-        self.scaler = scaler
         self.args = args
         self.feature_index = {name: idx for idx, name in enumerate(INPUT_COLUMNS)}
         self.action_index = {name: idx for idx, name in enumerate(BINARY_ACTION_COLUMNS)}
@@ -69,10 +67,8 @@ class ScenarioRunner:
 
     def _predict(self, window: np.ndarray) -> dict[str, np.ndarray]:
         batched = np.expand_dims(window.astype(np.float32), axis=0)
-        if self.scaler is not None:
-            frame = pd.DataFrame(batched[0], columns=INPUT_COLUMNS)
-            frame.loc[:, CONTINUOUS_INPUT_COLUMNS] = self.scaler.transform(frame.loc[:, CONTINUOUS_INPUT_COLUMNS])
-            batched[0] = frame.to_numpy(dtype=np.float32)
+        frame = pd.DataFrame(batched[0], columns=INPUT_COLUMNS)
+        batched[0] = normalize_continuous_inputs(frame).to_numpy(dtype=np.float32)
 
         outputs = self.model(mx.array(batched, dtype=mx.float32))
         return {
@@ -331,12 +327,6 @@ def parse_args() -> argparse.Namespace:
         default=CHECKPOINTS_DIR / "phase4_best_weights.npz",
         help="Path to the trained MLX checkpoint (.npz).",
     )
-    parser.add_argument(
-        "--scaler",
-        type=Path,
-        default=EXPORTS_DIR / "phase2_minmax_scaler.joblib",
-        help="Path to the fitted MinMax scaler used in Phase 2 feature prep.",
-    )
     parser.add_argument("--high-prob", type=float, default=0.8)
     parser.add_argument("--drop-prob", type=float, default=0.1)
     parser.add_argument("--rise-prob", type=float, default=0.9)
@@ -363,22 +353,14 @@ def build_model(checkpoint_path: Path) -> PvPSequenceModel:
     return model
 
 
-def load_scaler(path: Path) -> Any | None:
-    if not path.exists():
-        print(f"[WARN] scaler not found at {path}. Running without scaling.")
-        return None
-    return joblib.load(path)
-
-
 def main() -> int:
     args = parse_args()
     if not args.checkpoint.exists():
         raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
 
     model = build_model(args.checkpoint)
-    scaler = load_scaler(args.scaler)
 
-    runner = ScenarioRunner(model=model, scaler=scaler, args=args)
+    runner = ScenarioRunner(model=model, args=args)
     checks: list[Callable[[], ScenarioResult]] = [
         runner.scenario_chasing_enemy,
         runner.scenario_melee_combat,

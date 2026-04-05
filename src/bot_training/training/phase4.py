@@ -17,6 +17,8 @@ from bot_training.models.pvp_sequence_model import PvPSequenceModel
 BINARY_ACTION_COUNT = 9
 SLOT_COUNT = 9
 CONTINUOUS_COUNT = 2
+MAX_EPOCHS = 50
+EARLY_STOPPING_PATIENCE = 15
 
 
 @dataclass(slots=True)
@@ -286,7 +288,7 @@ def train_phase4_model(
     dataset: SequenceDataset,
     model: PvPSequenceModel,
     *,
-    epochs: int = 50,
+    epochs: int = MAX_EPOCHS,
     batch_size: int = 64,
     learning_rate: float = 0.001,
     validation_ratio: float = 0.2,
@@ -296,11 +298,15 @@ def train_phase4_model(
     split = split_dataset_by_match(dataset, train_ratio=1.0 - validation_ratio, seed=seed)
     optimizer = optim.Adam(learning_rate=learning_rate)
     loss_and_grad_fn = nn.value_and_grad(model, _mx_total_loss)
+    max_epochs = max(1, min(int(epochs), MAX_EPOCHS))
+    has_validation = split.validation.inputs.shape[0] > 0
 
     best_validation_loss = float("inf")
     saved_checkpoint: Path | None = None
+    epochs_since_improvement = 0
+    epochs_ran = 0
 
-    for epoch in range(epochs):
+    for epoch in range(max_epochs):
         train_losses: list[float] = []
         for batch in iter_batches(split.train, batch_size=batch_size, shuffle=True, seed=seed + epoch):
             train_losses.append(
@@ -308,25 +314,40 @@ def train_phase4_model(
             )
 
         train_loss = float(np.mean(train_losses)) if train_losses else 0.0
-        validation_loss = evaluate_phase4_model(model, split.validation, batch_size=batch_size)
+        validation_loss = (
+            evaluate_phase4_model(model, split.validation, batch_size=batch_size)
+            if has_validation
+            else train_loss
+        )
         improved = validation_loss < best_validation_loss
 
         if improved:
             best_validation_loss = validation_loss
+            epochs_since_improvement = 0
             if checkpoint_path is not None:
                 _save_checkpoint(model, checkpoint_path)
                 saved_checkpoint = checkpoint_path
+        elif has_validation:
+            epochs_since_improvement += 1
 
         checkpoint_status = "saved" if improved and checkpoint_path is not None else "unchanged"
         print(
-            f"Epoch {epoch + 1}/{epochs} - train_loss={train_loss:.6f} - "
+            f"Epoch {epoch + 1}/{max_epochs} - train_loss={train_loss:.6f} - "
             f"val_loss={validation_loss:.6f} - best_val_loss={best_validation_loss:.6f} - "
             f"checkpoint={checkpoint_status}"
         )
 
+        epochs_ran = epoch + 1
+        if has_validation and epochs_since_improvement >= EARLY_STOPPING_PATIENCE:
+            print(
+                f"Early stopping triggered after {epochs_ran} epochs "
+                f"(patience={EARLY_STOPPING_PATIENCE})."
+            )
+            break
+
     return TrainResult(
         best_validation_loss=best_validation_loss,
-        epochs_ran=epochs,
+        epochs_ran=epochs_ran,
         checkpoint_path=saved_checkpoint,
     )
 

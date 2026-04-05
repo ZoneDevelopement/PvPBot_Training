@@ -11,7 +11,13 @@ import numpy as np
 import pandas as pd
 
 from bot_training.config import EXPORTS_DIR, PROCESSED_DATA_DIR
-from bot_training.features.build_features import FeatureEngineeringResult, engineer_feature_tensors
+from bot_training.features.build_features import (
+    FeatureEngineeringResult,
+    UNKNOWN_ITEM_TOKEN,
+    engineer_feature_tensors,
+    extract_categorical_item_slots,
+    save_item_vocabulary,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,30 +57,18 @@ def parse_args() -> argparse.Namespace:
         help="Destination directory for batch NPZ files when --input-dir is used.",
     )
     parser.add_argument(
-        "--scaler-file",
-        type=Path,
-        default=EXPORTS_DIR / "phase2_minmax_scaler.joblib",
-        help="Destination scaler path for --input-file mode.",
-    )
-    parser.add_argument(
         "--vocabulary-file",
         "--vocab-file",
         dest="vocabulary_file",
         type=Path,
         default=EXPORTS_DIR / "phase2_item_vocabulary.json",
-        help="Destination item vocabulary JSON for --input-file mode.",
-    )
-    parser.add_argument(
-        "--scaler-dir",
-        type=Path,
-        default=EXPORTS_DIR / "phase2_scalers_per_file",
-        help="Destination directory for batch scaler artifacts when --input-dir is used.",
+        help="Destination item vocabulary JSON (single-file mode and global batch vocabulary).",
     )
     parser.add_argument(
         "--vocab-dir",
         type=Path,
         default=EXPORTS_DIR / "phase2_vocabs_per_file",
-        help="Destination directory for per-file item vocabulary JSON artifacts.",
+        help="Deprecated: per-file vocab output is replaced by --vocabulary-file in batch mode.",
     )
     parser.add_argument(
         "--manifest-file",
@@ -110,7 +104,6 @@ def _save_result_arrays(output_file: Path, result: FeatureEngineeringResult) -> 
 def _run_single_file(
     input_file: Path,
     output_file: Path,
-    scaler_file: Path,
     vocabulary_file: Path,
     window_size: int,
 ) -> None:
@@ -118,7 +111,6 @@ def _run_single_file(
     result: FeatureEngineeringResult = engineer_feature_tensors(
         dataframe,
         window_size=window_size,
-        scaler_path=scaler_file,
         vocabulary_path=vocabulary_file,
     )
     _save_result_arrays(output_file, result)
@@ -127,7 +119,6 @@ def _run_single_file(
     print(f"Categorical feature width: {result.categorical_inputs.shape[1]}")
     print(f"Windows: {result.input_windows.shape[0]}")
     print(f"Saved tensors: {output_file.resolve()}")
-    print(f"Saved scaler: {scaler_file.resolve()}")
     print(f"Saved item vocabulary: {vocabulary_file.resolve()}")
 
 
@@ -146,22 +137,40 @@ def _run_batch(args: argparse.Namespace) -> int:
         )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    args.scaler_dir.mkdir(parents=True, exist_ok=True)
-    args.vocab_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Discovered {len(input_files)} input files.", flush=True)
+    print("Pass 1/2: building global item vocabulary...", flush=True)
+
+    # Pass 1: collect all unique cleaned item names into one global vocabulary.
+    unique_items: set[str] = set()
+    for index, input_file in enumerate(input_files, start=1):
+        dataframe = _read_dataframe(input_file)
+        categorical_slots = extract_categorical_item_slots(dataframe)
+        unique_items.update(item for item in categorical_slots.to_numpy().ravel() if item)
+        if index % 50 == 0 or index == len(input_files):
+            print(f"  pass1 progress: {index}/{len(input_files)} files", flush=True)
+
+    global_vocabulary: dict[str, int] = {"": 0, UNKNOWN_ITEM_TOKEN: 1}
+    for index, item_name in enumerate(sorted(item for item in unique_items if item != UNKNOWN_ITEM_TOKEN), start=2):
+        global_vocabulary[item_name] = index
+
+    save_item_vocabulary(global_vocabulary, args.vocabulary_file)
+    print(
+        f"Saved global vocabulary: {args.vocabulary_file.resolve()} (size={len(global_vocabulary)})",
+        flush=True,
+    )
 
     manifest: list[dict[str, object]] = []
+    print("Pass 2/2: generating tensors per file...", flush=True)
+    # Pass 2: encode each file using the same global vocabulary.
     for index, input_file in enumerate(input_files, start=1):
         stem = input_file.stem
         output_file = args.output_dir / f"{stem}_features.npz"
-        scaler_file = args.scaler_dir / f"{stem}_scaler.joblib"
-        vocab_file = args.vocab_dir / f"{stem}_item_vocabulary.json"
 
         dataframe = _read_dataframe(input_file)
         result: FeatureEngineeringResult = engineer_feature_tensors(
             dataframe,
             window_size=args.window_size,
-            scaler_path=scaler_file,
-            vocabulary_path=vocab_file,
+            item_vocabulary=global_vocabulary,
         )
         _save_result_arrays(output_file, result)
 
@@ -169,8 +178,7 @@ def _run_batch(args: argparse.Namespace) -> int:
             {
                 "input_file": str(input_file),
                 "output_file": str(output_file),
-                "scaler_file": str(scaler_file),
-                "vocabulary_file": str(vocab_file),
+                "vocabulary_file": str(args.vocabulary_file),
                 "rows_transformed": int(result.inputs.shape[0]),
                 "feature_width": int(result.inputs.shape[1]),
                 "categorical_feature_width": int(result.categorical_inputs.shape[1]),
@@ -178,15 +186,14 @@ def _run_batch(args: argparse.Namespace) -> int:
                 "unique_match_ids": int(len(set(result.window_match_ids.tolist()))) if result.window_match_ids.size else 0,
             }
         )
-        print(f"[{index}/{len(input_files)}] {input_file.name} -> {output_file.name}")
+        print(f"[{index}/{len(input_files)}] {input_file.name} -> {output_file.name}", flush=True)
 
     args.manifest_file.parent.mkdir(parents=True, exist_ok=True)
     args.manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"Processed files: {len(input_files)}")
     print(f"Saved manifest: {args.manifest_file.resolve()}")
     print(f"Batch tensor dir: {args.output_dir.resolve()}")
-    print(f"Batch scaler dir: {args.scaler_dir.resolve()}")
-    print(f"Batch vocab dir: {args.vocab_dir.resolve()}")
+    print(f"Global vocab file: {args.vocabulary_file.resolve()}")
     return 0
 
 
@@ -196,7 +203,6 @@ def main() -> int:
         _run_single_file(
             input_file=args.input_file,
             output_file=args.output_file,
-            scaler_file=args.scaler_file,
             vocabulary_file=args.vocabulary_file,
             window_size=args.window_size,
         )

@@ -1,0 +1,37 @@
+Phase 4 Scenario Automation Report
+=================================
+Generated at: 2026-04-05T22:05:22
+Command: /Users/nandordukat/Documents/Munka/IdeaProjects/ZonePractice/Bot_Training/.venv/bin/python3 /Users/nandordukat/Documents/Munka/IdeaProjects/ZonePractice/Bot_Training/scripts/assert_phase4_scenarios.py --allow-failures
+Subprocess exit code: 0
+
+Overview
+--------
+Parsed scenarios: 12
+Parsed passes: 0
+Parsed failures: 12
+Scenario script completion line total: 12
+Scenario script completion line failures: 12
+
+Complex Inventory Action Checks
+-------------------------------
+- Step 6 - Drinking Potion: FAIL | switch to potion slot when health is critically low: incorrect (actual_slot=0, expected_slot=1, rmb=0.001)
+- Step 9 - Food Eating: FAIL | switch to food slot when sustained resources are low: incorrect (actual_slot=0, expected_slot=3, rmb=0.001)
+
+Per-Scenario Results
+--------------------
+- [FAIL] Step 2 - Chasing Enemy: forward=0.804, sprint=0.596, threshold=0.80
+- [FAIL] Step 3 - Melee Combat: lmb=0.006, threshold=0.80
+- [FAIL] Step 4 - Aiming: deltaYaw=-36.243, deltaPitch=-14.081 (expected positive)
+- [FAIL] Step 5 - Obstacle Jumping: jump=0.566, threshold=0.80
+- [FAIL] Step 6 - Drinking Potion: slot=0, expected=1, rmb=0.001
+- [FAIL] Step 7 - Splash Potion Attack: slot=0, expected=2, rmb=0.000, deltaYaw=76.712
+- [FAIL] Step 8 - Splash Potion Self Heal: slot=0, expected=2, rmb=0.000, deltaPitch=-11.888, threshold=0.50
+- [FAIL] Step 9 - Food Eating: slot=0, expected=3, rmb=0.001
+- [FAIL] Step 10 - Golden Apple Pre Buff: slot=0, expected=4, rmb=0.002
+- [FAIL] Step 11 - Sprint Reset: sprint: 0.624->0.624, forward: 0.860->0.860, drop<=0.10, rise>=0.90
+- [FAIL] Step 12 - Block Hitting: lmb=(0.006,0.005), rmb=(0.000,0.000), threshold=0.80
+- [FAIL] Step 13 - Projectile Dodging: left=0.055, right=0.692, threshold=0.80
+
+Warnings
+--------
+- [WARN] Dataset features do not expose the following explicit scenario signals:
