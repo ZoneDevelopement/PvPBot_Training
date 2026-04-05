@@ -86,11 +86,11 @@ Use `--sample-fraction 0.1` to run on roughly 1/10 of files for faster iteration
 Convert cleaned phase 1 rows into normalized frame tensors and sequence windows. Phase 2 now writes one NPZ per cleaned match CSV under `data/processed/phase2_feature_tensors_per_file/`:
 
 ```bash
-python3 scripts/build_features.py \
-  --input-file data/processed/phase1_clean_matches_per_file/0008dfbd-2d81-3285-99b1-738c9761738a_ai_clean.csv \
-  --output-file data/processed/phase2_feature_tensors_per_file/0008dfbd-2d81-3285-99b1-738c9761738a_ai_clean_features.npz \
+python scripts/build_features.py \
+  --input-file data/processed/phase1_clean_matches_per_file/example_ai_clean.csv \
+  --output-file data/processed/phase2_feature_tensors.npz \
   --scaler-file models/exports/phase2_minmax_scaler.joblib \
-  --window-size 20
+  --vocabulary-file models/exports/phase2_item_vocabulary.json
 ```
 
 Run the full batch pipeline over every per-file clean CSV:
@@ -102,6 +102,7 @@ python3 scripts/build_features.py \
   --output-dir data/processed/phase2_feature_tensors_per_file \
   --scaler-dir models/exports/phase2_scalers_per_file \
   --manifest-file data/processed/phase2_feature_manifest.json \
+  --vocabulary-file models/exports/phase2_item_vocabulary.json \
   --window-size 20
 ```
 

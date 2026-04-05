@@ -11,7 +11,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from bot_training.features.build_features import INPUT_COLUMNS, ITEM_SLOT_COLUMNS  # noqa: E402
+from bot_training.features.build_features import INPUT_COLUMNS  # noqa: E402
 from bot_training.models.pvp_sequence_model import PvPSequenceModel  # noqa: E402
 from bot_training.training.phase4 import (  # noqa: E402
     SequenceDataset,
@@ -27,7 +27,7 @@ from bot_training.training.phase4 import (  # noqa: E402
 )
 
 FEATURE_COUNT = len(INPUT_COLUMNS)
-CATEGORICAL_FEATURE_COUNT = len(ITEM_SLOT_COLUMNS)
+CATEGORICAL_FEATURE_COUNT = 38
 BOOLEAN_ACTION_COUNT = 9
 WINDOW_SIZE = 5
 
@@ -35,12 +35,7 @@ WINDOW_SIZE = 5
 def _make_synthetic_dataset(sample_count: int = 96, seed: int = 7) -> SequenceDataset:
     rng = np.random.default_rng(seed)
     windows = rng.normal(size=(sample_count, WINDOW_SIZE, FEATURE_COUNT)).astype(np.float32)
-    categorical_windows = rng.integers(
-        low=0,
-        high=32,
-        size=(sample_count, WINDOW_SIZE, CATEGORICAL_FEATURE_COUNT),
-        dtype=np.int32,
-    )
+    categorical_windows = np.zeros((sample_count, WINDOW_SIZE, CATEGORICAL_FEATURE_COUNT), dtype=np.int32)
     last = windows[:, -1, :]
 
     binary_targets = np.zeros((sample_count, BOOLEAN_ACTION_COUNT), dtype=np.float32)
