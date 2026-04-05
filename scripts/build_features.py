@@ -57,7 +57,9 @@ def parse_args() -> argparse.Namespace:
         help="Destination scaler path for --input-file mode.",
     )
     parser.add_argument(
+        "--vocabulary-file",
         "--vocab-file",
+        dest="vocabulary_file",
         type=Path,
         default=EXPORTS_DIR / "phase2_item_vocabulary.json",
         help="Destination item vocabulary JSON for --input-file mode.",
@@ -109,7 +111,7 @@ def _run_single_file(
     input_file: Path,
     output_file: Path,
     scaler_file: Path,
-    vocab_file: Path,
+    vocabulary_file: Path,
     window_size: int,
 ) -> None:
     dataframe = _read_dataframe(input_file)
@@ -117,7 +119,7 @@ def _run_single_file(
         dataframe,
         window_size=window_size,
         scaler_path=scaler_file,
-        vocabulary_path=vocab_file,
+        vocabulary_path=vocabulary_file,
     )
     _save_result_arrays(output_file, result)
     print(f"Rows transformed: {result.inputs.shape[0]}")
@@ -126,7 +128,7 @@ def _run_single_file(
     print(f"Windows: {result.input_windows.shape[0]}")
     print(f"Saved tensors: {output_file.resolve()}")
     print(f"Saved scaler: {scaler_file.resolve()}")
-    print(f"Saved item vocabulary: {vocab_file.resolve()}")
+    print(f"Saved item vocabulary: {vocabulary_file.resolve()}")
 
 
 def _discover_input_files(input_dir: Path, pattern: str, max_files: int | None) -> list[Path]:
@@ -195,7 +197,7 @@ def main() -> int:
             input_file=args.input_file,
             output_file=args.output_file,
             scaler_file=args.scaler_file,
-            vocab_file=args.vocab_file,
+            vocabulary_file=args.vocabulary_file,
             window_size=args.window_size,
         )
         return 0
@@ -205,5 +207,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
