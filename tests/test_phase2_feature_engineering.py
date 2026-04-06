@@ -39,9 +39,6 @@ def _mock_dataframe(row_count: int = 3) -> pd.DataFrame:
         "health": np.linspace(20, 10, row_count),
         "foodLevel": np.linspace(20, 12, row_count),
         "damageDealt": np.linspace(0, 6, row_count),
-        "posX": np.arange(row_count),
-        "posY": np.arange(row_count) + 64,
-        "posZ": np.arange(row_count) + 100,
         "velX": np.linspace(0.1, 0.3, row_count),
         "velY": np.linspace(0.0, 0.2, row_count),
         "velZ": np.linspace(-0.1, 0.1, row_count),
@@ -137,8 +134,8 @@ def test_delta_calculation_matches_expected_difference() -> None:
 
     deltas = compute_delta_targets(dataframe)
 
-    assert deltas.loc[0, "deltaYaw"] == 3.5
-    assert deltas.loc[0, "deltaPitch"] == 6.5
+    assert np.isclose(deltas.loc[0, "deltaYaw"], 3.5 / 180.0)
+    assert np.isclose(deltas.loc[0, "deltaPitch"], 6.5 / 90.0)
 
 
 def test_normalizer_applies_fixed_minecraft_scaling() -> None:
@@ -157,7 +154,6 @@ def test_normalizer_applies_fixed_minecraft_scaling() -> None:
     assert np.isclose(scaled[0, feature_idx["targetDistance"]], 6.0 / 50.0)
     assert np.isclose(scaled[0, feature_idx["velX"]], 0.1 / 4.0)
     assert np.isclose(scaled[0, feature_idx["targetVelX"]], 0.0)
-    assert np.isclose(scaled[0, feature_idx["posZ"]], 1.0)
     assert np.isclose(scaled[0, feature_idx["targetRelY"]], -0.5 / 50.0)
     assert np.isclose(scaled[0, feature_idx["nearestProjectileDx"]], -2.0 / 50.0)
 

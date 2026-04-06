@@ -35,8 +35,17 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     dataset = load_phase2_dataset(args.dataset)
+    expected_feature_count = len(INPUT_COLUMNS)
+    actual_feature_count = int(dataset.inputs.shape[-1])
+    if actual_feature_count != expected_feature_count:
+        raise ValueError(
+            "Phase 2 feature width mismatch: "
+            f"dataset has {actual_feature_count}, expected {expected_feature_count} from INPUT_COLUMNS. "
+            "Regenerate Phase 2 tensors with the current build_features schema before training."
+        )
+
     model = PvPSequenceModel(
-        input_feature_count=len(INPUT_COLUMNS),
+        input_feature_count=expected_feature_count,
         boolean_action_count=9,
     )
     result = train_phase4_model(

@@ -15,9 +15,6 @@ INPUT_COLUMNS: tuple[str, ...] = (
     "health",
     "foodLevel",
     "damageDealt",
-    "posX",
-    "posY",
-    "posZ",
     "velX",
     "velY",
     "velZ",
@@ -68,9 +65,6 @@ HEALTH_COLUMNS: tuple[str, ...] = ("health", "foodLevel", "damageDealt", "target
 YAW_COLUMNS: tuple[str, ...] = ("yaw", "targetYaw")
 PITCH_COLUMNS: tuple[str, ...] = ("pitch", "targetPitch")
 SPATIAL_COLUMNS: tuple[str, ...] = (
-    "posX",
-    "posY",
-    "posZ",
     "targetDistance",
     "targetRelX",
     "targetRelY",
@@ -184,6 +178,11 @@ def compute_delta_targets(dataframe: pd.DataFrame, yaw_column: str = "yaw", pitc
     else:
         delta_yaw = yaw.shift(-1) - yaw
         delta_pitch = pitch.shift(-1) - pitch
+
+    # Keep regression targets on comparable scale with classification losses.
+    delta_yaw = delta_yaw / 180.0
+    delta_pitch = delta_pitch / 90.0
+
     deltas = pd.DataFrame(
         {
             "deltaYaw": delta_yaw,
@@ -371,8 +370,8 @@ def normalize_continuous_inputs(inputs: pd.DataFrame) -> pd.DataFrame:
     normalized.loc[:, HEALTH_COLUMNS] = normalized.loc[:, HEALTH_COLUMNS] / 20.0
     normalized.loc[:, YAW_COLUMNS] = normalized.loc[:, YAW_COLUMNS] / 180.0
     normalized.loc[:, PITCH_COLUMNS] = normalized.loc[:, PITCH_COLUMNS] / 90.0
-    normalized.loc[:, SPATIAL_COLUMNS] = np.minimum(normalized.loc[:, SPATIAL_COLUMNS] / 50.0, 1.0)
-    normalized.loc[:, VELOCITY_COLUMNS] = np.minimum(normalized.loc[:, VELOCITY_COLUMNS] / 4.0, 1.0)
+    normalized.loc[:, SPATIAL_COLUMNS] = np.clip(normalized.loc[:, SPATIAL_COLUMNS] / 50.0, -1.0, 1.0)
+    normalized.loc[:, VELOCITY_COLUMNS] = np.clip(normalized.loc[:, VELOCITY_COLUMNS] / 4.0, -1.0, 1.0)
     return normalized
 
 
