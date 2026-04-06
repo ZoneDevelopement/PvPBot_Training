@@ -179,6 +179,9 @@ def compute_delta_targets(dataframe: pd.DataFrame, yaw_column: str = "yaw", pitc
         delta_yaw = yaw.shift(-1) - yaw
         delta_pitch = pitch.shift(-1) - pitch
 
+    # Wrap delta yaw angles to [-180, 180] range before scaling.
+    delta_yaw = (delta_yaw + 180) % 360 - 180
+
     # Keep regression targets on comparable scale with classification losses.
     delta_yaw = delta_yaw / 180.0
     delta_pitch = delta_pitch / 90.0

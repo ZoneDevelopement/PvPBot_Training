@@ -175,12 +175,36 @@ def iter_batches(
         # Remap slot targets so they still point to the original selected item after shuffling.
         slot_targets = hotbar_inverse_permutation[batch.slot_targets.astype(np.int32, copy=False)]
 
+        # Spatial mirror augmentation: randomly flip left-right movement and spatial coordinates.
+        continuous_inputs = np.array(batch.inputs, copy=True)
+        binary_targets = np.array(batch.binary_targets, copy=True)
+        continuous_targets = np.array(batch.continuous_targets, copy=True)
+
+        should_mirror = rng.random() < 0.5
+        if should_mirror:
+            # Mirror spatial features across all 20 frames in the window.
+            # Indices: velX=3, targetRelX=10, targetVelX=18, nearestProjectileDx=13
+            continuous_inputs[:, :, 3] *= -1.0  # velX
+            continuous_inputs[:, :, 10] *= -1.0  # targetRelX
+            continuous_inputs[:, :, 18] *= -1.0  # targetVelX
+            continuous_inputs[:, :, 13] *= -1.0  # nearestProjectileDx
+
+            # Swap inputLeft and inputRight in binary targets.
+            # Indices: inputLeft=2, inputRight=3
+            binary_targets[:, 2], binary_targets[:, 3] = (
+                binary_targets[:, 3].copy(),
+                binary_targets[:, 2].copy(),
+            )
+
+            # Negate deltaYaw (first element of continuous_targets).
+            continuous_targets[:, 0] *= -1.0
+
         yield SequenceDataset(
-            inputs=batch.inputs,
+            inputs=continuous_inputs,
             categorical_inputs=categorical_inputs,
-            binary_targets=batch.binary_targets,
+            binary_targets=binary_targets,
             slot_targets=slot_targets.astype(np.int32, copy=False),
-            continuous_targets=batch.continuous_targets,
+            continuous_targets=continuous_targets,
             match_ids=batch.match_ids,
         )
 
