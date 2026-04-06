@@ -261,7 +261,7 @@ def _save_checkpoint(model: PvPSequenceModel, checkpoint_path: Path) -> None:
 
 def train_on_batch(
     model: PvPSequenceModel,
-    optimizer: optim.Adam,
+    optimizer: optim.Adam | optim.AdamW,
     batch: SequenceDataset,
     *,
     loss_and_grad_fn: Callable | None = None,
@@ -296,7 +296,7 @@ def train_phase4_model(
     checkpoint_path: Path | None = None,
 ) -> TrainResult:
     split = split_dataset_by_match(dataset, train_ratio=1.0 - validation_ratio, seed=seed)
-    optimizer = optim.Adam(learning_rate=learning_rate)
+    optimizer = optim.AdamW(learning_rate=learning_rate, weight_decay=0.01)
     loss_and_grad_fn = nn.value_and_grad(model, _mx_total_loss)
     max_epochs = max(1, min(int(epochs), MAX_EPOCHS))
     has_validation = split.validation.inputs.shape[0] > 0
@@ -307,6 +307,7 @@ def train_phase4_model(
     epochs_ran = 0
 
     for epoch in range(max_epochs):
+        model.train()
         train_losses: list[float] = []
         for batch in iter_batches(split.train, batch_size=batch_size, shuffle=True, seed=seed + epoch):
             train_losses.append(
@@ -314,6 +315,7 @@ def train_phase4_model(
             )
 
         train_loss = float(np.mean(train_losses)) if train_losses else 0.0
+        model.eval()
         validation_loss = (
             evaluate_phase4_model(model, split.validation, batch_size=batch_size)
             if has_validation

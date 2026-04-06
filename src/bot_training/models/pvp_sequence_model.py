@@ -42,6 +42,7 @@ class PvPSequenceModel(nn.Module):
         self.input_projection = nn.Linear(input_feature_count, hidden_dim)
         self.item_embedding = nn.Embedding(item_vocabulary_size, item_embedding_dim)
         self.item_projection = nn.Linear(item_slot_count * item_embedding_dim, hidden_dim)
+        self.dropout = nn.Dropout(0.2)
         self.transformer_encoder = nn.TransformerEncoder(
             num_layers=num_layers,
             dims=hidden_dim,
@@ -105,9 +106,10 @@ class PvPSequenceModel(nn.Module):
             projected = projected + categorical_projected
 
         positional_encoding = self._build_positional_encoding(projected.shape[1])
-        encoded = self.transformer_encoder(projected + positional_encoding, mask=None)
+        encoded_inputs = self.dropout(projected + positional_encoding)
+        encoded = self.transformer_encoder(encoded_inputs, mask=None)
 
-        final_timestep = encoded[:, -1, :]
+        final_timestep = self.dropout(encoded[:, -1, :])
         binary_probabilities = mx.sigmoid(self.binary_head(final_timestep))
         slot_probabilities = mx.softmax(self.slot_head(final_timestep), axis=-1)
         continuous_deltas = self.continuous_head(final_timestep)
