@@ -170,7 +170,7 @@ def iter_batches(
 
         # Hotbar augmentation: shuffle first 9 categorical slots across every frame in each window.
         categorical_inputs = np.array(batch.categorical_inputs, copy=True)
-        categorical_inputs[:, :, :9] = categorical_inputs[:, :, hotbar_permutation]
+        categorical_inputs[:, :, 2:11] = categorical_inputs[:, :, hotbar_permutation]
 
         # Remap slot targets so they still point to the original selected item after shuffling.
         slot_targets = hotbar_inverse_permutation[batch.slot_targets.astype(np.int32, copy=False)]

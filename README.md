@@ -131,7 +131,7 @@ python3 scripts/train_model.py \
   --checkpoint models/checkpoints/phase4_best_weights.npz \
   --epochs 50 \
   --batch-size 256 \
-  --learning-rate 0.001
+  --learning-rate 0.0001
 ```
 
 The trainer splits windows by `match_id`, uses an 80/20 train/validation split, and saves the best checkpoint only when validation loss improves.
@@ -145,7 +145,7 @@ python3 scripts/train_model.py \
   --resume \
   --epochs 20 \
   --batch-size 256 \
-  --learning-rate 0.001
+  --learning-rate 0.0001
 ```
 
 ## Rebuild Phase 2 + retrain Phase 4 (one command)
