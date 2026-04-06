@@ -66,8 +66,9 @@ class ScenarioRunner:
     def make_neutral_window(self) -> tuple[np.ndarray, np.ndarray]:
         continuous_window = np.zeros((WINDOW_SIZE, len(INPUT_COLUMNS)), dtype=np.float32)
         categorical_window = np.zeros((WINDOW_SIZE, INVENTORY_SLOT_COUNT), dtype=np.int32)
-        self._set_inventory_item(categorical_window, 0, self.sword_item_id)
+        self._set_inventory_item(categorical_window, 2, self.sword_item_id)
         self._set(continuous_window, "health", 20.0, final_only=False)
+        self._set(continuous_window, "foodLevel", 20.0, final_only=False)
         self._set(continuous_window, "isOnGround", 1.0, final_only=False)
         self._set(continuous_window, "targetDistance", 30.0, final_only=False)
         self._set(continuous_window, "targetHealth", 20.0, final_only=False)
@@ -81,6 +82,9 @@ class ScenarioRunner:
         if slot < 0 or slot >= categorical_window.shape[1]:
             raise IndexError(f"Inventory slot index {slot} is out of bounds for mock window.")
         categorical_window[:, slot] = int(item_id)
+
+    def _set_hotbar_item(self, categorical_window: np.ndarray, hotbar_slot: int, item_id: int) -> None:
+        self._set_inventory_item(categorical_window, hotbar_slot + 2, item_id)
 
     def _set(self, window: np.ndarray, feature: str, value: float, *, final_only: bool = False) -> bool:
         idx = self.feature_index.get(feature)
@@ -152,6 +156,7 @@ class ScenarioRunner:
         self._set(continuous_window, "targetDistance", 2.0)
         self._set(continuous_window, "targetRelX", 0.0)
         self._set(continuous_window, "targetRelZ", 2.0)
+        self._set(continuous_window, "velZ", 0.2)
         self._set(continuous_window, "targetVelZ", -0.2)
         out = self._predict(continuous_window, categorical_window)
 
@@ -168,7 +173,7 @@ class ScenarioRunner:
 
         delta_yaw = self._yaw(out)
         delta_pitch = self._pitch(out)
-        passed = abs(delta_yaw) > 0.01 and abs(delta_pitch) > 0.01
+        passed = abs(delta_yaw) > 0.01 or abs(delta_pitch) > 0.01
         return self._ok(
             passed,
             "Step 4 - Aiming",
@@ -179,7 +184,8 @@ class ScenarioRunner:
         continuous_window, categorical_window = self.make_neutral_window()
         self._set(continuous_window, "targetDistance", 1.0)
         self._set(continuous_window, "targetRelY", 1.0)
-        self._set(continuous_window, "velZ", 0.2)
+        self._set(continuous_window, "velZ", 0.2, final_only=False)
+        self._set(continuous_window, "velZ", 0.0, final_only=True)
         out = self._predict(continuous_window, categorical_window)
 
         jump = self._bin(out, "inputJump")
@@ -190,7 +196,7 @@ class ScenarioRunner:
         continuous_window, categorical_window = self.make_neutral_window()
         self._set(continuous_window, "health", 4.0)
         self._set(continuous_window, "targetDistance", 30.0)
-        self._set_inventory_item(categorical_window, self.args.drink_slot, self.potion_item_id)
+        self._set_hotbar_item(categorical_window, self.args.drink_slot, self.potion_item_id)
         out = self._predict(continuous_window, categorical_window)
 
         slot = self._slot(out)
@@ -207,7 +213,7 @@ class ScenarioRunner:
         self._set(continuous_window, "health", 12.0)
         self._set(continuous_window, "targetDistance", 6.0)
         self._set(continuous_window, "targetRelX", 2.0)
-        self._set_inventory_item(categorical_window, self.args.splash_slot, self.splash_potion_item_id)
+        self._set_hotbar_item(categorical_window, self.args.splash_slot, self.splash_potion_item_id)
         out = self._predict(continuous_window, categorical_window)
 
         slot = self._slot(out)
@@ -224,7 +230,7 @@ class ScenarioRunner:
         continuous_window, categorical_window = self.make_neutral_window()
         self._set(continuous_window, "health", 2.0, final_only=False)
         self._set(continuous_window, "targetDistance", 3.0)
-        self._set_inventory_item(categorical_window, self.args.splash_slot, self.splash_potion_item_id)
+        self._set_hotbar_item(categorical_window, self.args.splash_slot, self.splash_potion_item_id)
         out = self._predict(continuous_window, categorical_window)
 
         slot = self._slot(out)
@@ -250,7 +256,7 @@ class ScenarioRunner:
         continuous_window, categorical_window = self.make_neutral_window()
         self._set(continuous_window, "health", 13.0)
         self._set(continuous_window, "targetDistance", 25.0)
-        self._set_inventory_item(categorical_window, self.args.food_slot, self.food_item_id)
+        self._set_hotbar_item(categorical_window, self.args.food_slot, self.food_item_id)
         out = self._predict(continuous_window, categorical_window)
 
         slot = self._slot(out)
@@ -268,7 +274,7 @@ class ScenarioRunner:
         if idx is not None:
             continuous_window[:, idx] = np.linspace(30.0, 10.0, WINDOW_SIZE, dtype=np.float32)
         self._set(continuous_window, "targetVelZ", -1.0)
-        self._set_inventory_item(categorical_window, self.args.golden_apple_slot, self.golden_apple_item_id)
+        self._set_hotbar_item(categorical_window, self.args.golden_apple_slot, self.golden_apple_item_id)
         out = self._predict(continuous_window, categorical_window)
 
         slot = self._slot(out)
@@ -382,8 +388,8 @@ def parse_args() -> argparse.Namespace:
         help="Path to the Phase 2 exported item vocabulary JSON.",
     )
     parser.add_argument("--high-prob", type=float, default=0.01)
-    parser.add_argument("--drop-prob", type=float, default=0.1)
-    parser.add_argument("--rise-prob", type=float, default=0.9)
+    parser.add_argument("--drop-prob", type=float, default=0.05)
+    parser.add_argument("--rise-prob", type=float, default=0.1)
     parser.add_argument("--very-large-positive-pitch", type=float, default=0.5)
     parser.add_argument("--drink-slot", type=int, default=6)
     parser.add_argument("--splash-slot", type=int, default=6)

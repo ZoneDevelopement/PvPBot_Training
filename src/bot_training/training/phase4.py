@@ -170,7 +170,7 @@ def iter_batches(
 
         # Hotbar augmentation: shuffle first 9 categorical slots across every frame in each window.
         categorical_inputs = np.array(batch.categorical_inputs, copy=True)
-        categorical_inputs[:, :, 2:11] = categorical_inputs[:, :, hotbar_permutation]
+        categorical_inputs[:, :, 2:11] = categorical_inputs[:, :, hotbar_permutation + 2]
 
         # Remap slot targets so they still point to the original selected item after shuffling.
         slot_targets = hotbar_inverse_permutation[batch.slot_targets.astype(np.int32, copy=False)]
@@ -184,6 +184,8 @@ def iter_batches(
         if should_mirror:
             # Mirror spatial features across all 20 frames in the window.
             # Indices: velX=3, targetRelX=10, targetVelX=18, nearestProjectileDx=13
+            continuous_inputs[:, :, 6] *= -1.0  # yaw
+            continuous_inputs[:, :, 16] *= -1.0  # targetYaw
             continuous_inputs[:, :, 3] *= -1.0  # velX
             continuous_inputs[:, :, 10] *= -1.0  # targetRelX
             continuous_inputs[:, :, 18] *= -1.0  # targetVelX
