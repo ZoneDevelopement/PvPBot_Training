@@ -13,6 +13,8 @@ import pandas as pd
 
 INPUT_COLUMNS: tuple[str, ...] = (
     "health",
+    "foodLevel",
+    "damageDealt",
     "posX",
     "posY",
     "posZ",
@@ -26,6 +28,9 @@ INPUT_COLUMNS: tuple[str, ...] = (
     "targetRelX",
     "targetRelY",
     "targetRelZ",
+    "nearestProjectileDx",
+    "nearestProjectileDy",
+    "nearestProjectileDz",
     "targetYaw",
     "targetPitch",
     "targetVelX",
@@ -59,7 +64,7 @@ CONTINUOUS_INPUT_COLUMNS: tuple[str, ...] = tuple(col for col in INPUT_COLUMNS i
 DELTA_COLUMNS: tuple[str, ...] = ("deltaYaw", "deltaPitch")
 TARGET_COLUMNS: tuple[str, ...] = ACTION_COLUMNS + (SLOT_COLUMN,) + DELTA_COLUMNS
 
-HEALTH_COLUMNS: tuple[str, ...] = ("health", "targetHealth")
+HEALTH_COLUMNS: tuple[str, ...] = ("health", "foodLevel", "damageDealt", "targetHealth")
 YAW_COLUMNS: tuple[str, ...] = ("yaw", "targetYaw")
 PITCH_COLUMNS: tuple[str, ...] = ("pitch", "targetPitch")
 SPATIAL_COLUMNS: tuple[str, ...] = (
@@ -70,6 +75,9 @@ SPATIAL_COLUMNS: tuple[str, ...] = (
     "targetRelX",
     "targetRelY",
     "targetRelZ",
+    "nearestProjectileDx",
+    "nearestProjectileDy",
+    "nearestProjectileDz",
 )
 VELOCITY_COLUMNS: tuple[str, ...] = (
     "velX",

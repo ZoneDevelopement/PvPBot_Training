@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -13,7 +14,7 @@ import mlx.core as mx
 
 import _bootstrap  # noqa: F401
 
-from bot_training.config import CHECKPOINTS_DIR
+from bot_training.config import CHECKPOINTS_DIR, EXPORTS_DIR
 from bot_training.features.build_features import (
     BINARY_ACTION_COLUMNS,
     INPUT_COLUMNS,
@@ -23,6 +24,7 @@ from bot_training.models.pvp_sequence_model import PvPSequenceModel
 
 
 WINDOW_SIZE = 20
+INVENTORY_SLOT_COUNT = 38
 
 
 @dataclass(slots=True)
@@ -33,25 +35,52 @@ class ScenarioResult:
 
 
 class ScenarioRunner:
-    def __init__(self, model: PvPSequenceModel, args: argparse.Namespace) -> None:
+    def __init__(
+        self,
+        model: PvPSequenceModel,
+        args: argparse.Namespace,
+        item_vocabulary: dict[str, int],
+    ) -> None:
         self.model = model
         self.args = args
+        self.item_vocabulary = item_vocabulary
         self.feature_index = {name: idx for idx, name in enumerate(INPUT_COLUMNS)}
         self.action_index = {name: idx for idx, name in enumerate(BINARY_ACTION_COLUMNS)}
         self.missing_capabilities: list[str] = []
+        self.potion_item_id = self._item_id("POTION")
+        self.splash_potion_item_id = self._item_id("SPLASH_POTION")
+        self.food_item_id = self._item_id("COOKED_BEEF")
+        self.golden_apple_item_id = self._item_id("GOLDEN_APPLE")
 
-    def make_neutral_window(self) -> np.ndarray:
-        window = np.zeros((WINDOW_SIZE, len(INPUT_COLUMNS)), dtype=np.float32)
-        self._set(window, "health", 20.0, final_only=False)
-        self._set(window, "isOnGround", 1.0, final_only=False)
-        self._set(window, "targetDistance", 30.0, final_only=False)
-        self._set(window, "targetHealth", 20.0, final_only=False)
-        self._set(window, "targetRelX", 0.0, final_only=False)
-        self._set(window, "targetRelY", 0.0, final_only=False)
-        self._set(window, "targetRelZ", 1.0, final_only=False)
-        return window
+    def _item_id(self, item_name: str) -> int:
+        item_id = self.item_vocabulary.get(item_name)
+        if item_id is None:
+            raise KeyError(f"Required item '{item_name}' was not found in the item vocabulary.")
+        if int(item_id) >= int(self.model.item_vocabulary_size):
+            raise ValueError(
+                f"Item '{item_name}' id {item_id} exceeds model item vocabulary size {self.model.item_vocabulary_size}."
+            )
+        return int(item_id)
 
-    def _set(self, window: np.ndarray, feature: str, value: float, *, final_only: bool = True) -> bool:
+    def make_neutral_window(self) -> tuple[np.ndarray, np.ndarray]:
+        continuous_window = np.zeros((WINDOW_SIZE, len(INPUT_COLUMNS)), dtype=np.float32)
+        categorical_window = np.zeros((WINDOW_SIZE, INVENTORY_SLOT_COUNT), dtype=np.int32)
+        self._set(continuous_window, "health", 20.0, final_only=False)
+        self._set(continuous_window, "isOnGround", 1.0, final_only=False)
+        self._set(continuous_window, "targetDistance", 30.0, final_only=False)
+        self._set(continuous_window, "targetHealth", 20.0, final_only=False)
+        self._set(continuous_window, "targetRelX", 0.0, final_only=False)
+        self._set(continuous_window, "targetRelY", 0.0, final_only=False)
+        self._set(continuous_window, "targetRelZ", 1.0, final_only=False)
+        return continuous_window, categorical_window
+
+    @staticmethod
+    def _set_inventory_item(categorical_window: np.ndarray, slot: int, item_id: int) -> None:
+        if slot < 0 or slot >= categorical_window.shape[1]:
+            raise IndexError(f"Inventory slot index {slot} is out of bounds for mock window.")
+        categorical_window[:, slot] = int(item_id)
+
+    def _set(self, window: np.ndarray, feature: str, value: float, *, final_only: bool = False) -> bool:
         idx = self.feature_index.get(feature)
         if idx is None:
             return False
@@ -65,12 +94,16 @@ class ScenarioRunner:
         if feature not in self.feature_index:
             self.missing_capabilities.append(capability_name)
 
-    def _predict(self, window: np.ndarray) -> dict[str, np.ndarray]:
-        batched = np.expand_dims(window.astype(np.float32), axis=0)
-        frame = pd.DataFrame(batched[0], columns=INPUT_COLUMNS)
-        batched[0] = normalize_continuous_inputs(frame).to_numpy(dtype=np.float32)
+    def _predict(self, continuous_window: np.ndarray, categorical_window: np.ndarray) -> dict[str, np.ndarray]:
+        batched_continuous = np.expand_dims(continuous_window.astype(np.float32), axis=0)
+        batched_categorical = np.expand_dims(categorical_window.astype(np.int32), axis=0)
+        frame = pd.DataFrame(batched_continuous[0], columns=INPUT_COLUMNS)
+        batched_continuous[0] = normalize_continuous_inputs(frame).to_numpy(dtype=np.float32)
 
-        outputs = self.model(mx.array(batched, dtype=mx.float32))
+        outputs = self.model(
+            mx.array(batched_continuous, dtype=mx.float32),
+            mx.array(batched_categorical, dtype=mx.int32),
+        )
         return {
             "binary_probabilities": np.asarray(outputs["binary_probabilities"])[0],
             "slot_probabilities": np.asarray(outputs["slot_probabilities"])[0],
@@ -96,12 +129,12 @@ class ScenarioRunner:
         return ScenarioResult(name=name, passed=condition, details=details)
 
     def scenario_chasing_enemy(self) -> ScenarioResult:
-        window = self.make_neutral_window()
-        self._set(window, "targetDistance", 15.0)
-        self._set(window, "targetRelX", 0.0)
-        self._set(window, "targetRelY", 0.0)
-        self._set(window, "targetRelZ", 1.0)
-        out = self._predict(window)
+        continuous_window, categorical_window = self.make_neutral_window()
+        self._set(continuous_window, "targetDistance", 15.0)
+        self._set(continuous_window, "targetRelX", 0.0)
+        self._set(continuous_window, "targetRelY", 0.0)
+        self._set(continuous_window, "targetRelZ", 1.0)
+        out = self._predict(continuous_window, categorical_window)
 
         forward = self._bin(out, "inputForward")
         sprint = self._bin(out, "inputSprint")
@@ -113,22 +146,22 @@ class ScenarioRunner:
         )
 
     def scenario_melee_combat(self) -> ScenarioResult:
-        window = self.make_neutral_window()
-        self._set(window, "targetDistance", 2.0)
-        self._set(window, "targetRelX", 0.0)
-        self._set(window, "targetRelZ", 1.0)
-        out = self._predict(window)
+        continuous_window, categorical_window = self.make_neutral_window()
+        self._set(continuous_window, "targetDistance", 2.0)
+        self._set(continuous_window, "targetRelX", 0.0)
+        self._set(continuous_window, "targetRelZ", 1.0)
+        out = self._predict(continuous_window, categorical_window)
 
         lmb = self._bin(out, "inputLmb")
         passed = lmb >= self.args.high_prob
         return self._ok(passed, "Step 3 - Melee Combat", f"lmb={lmb:.3f}, threshold={self.args.high_prob:.2f}")
 
     def scenario_aiming(self) -> ScenarioResult:
-        window = self.make_neutral_window()
-        self._set(window, "targetRelX", 4.0)
-        self._set(window, "targetRelY", 2.0)
-        self._set(window, "targetRelZ", 6.0)
-        out = self._predict(window)
+        continuous_window, categorical_window = self.make_neutral_window()
+        self._set(continuous_window, "targetRelX", 4.0)
+        self._set(continuous_window, "targetRelY", 2.0)
+        self._set(continuous_window, "targetRelZ", 6.0)
+        out = self._predict(continuous_window, categorical_window)
 
         delta_yaw = self._yaw(out)
         delta_pitch = self._pitch(out)
@@ -140,20 +173,21 @@ class ScenarioRunner:
         )
 
     def scenario_obstacle_jumping(self) -> ScenarioResult:
-        window = self.make_neutral_window()
-        self._set(window, "targetDistance", 4.0)
-        self._set(window, "targetRelY", 5.0)
-        out = self._predict(window)
+        continuous_window, categorical_window = self.make_neutral_window()
+        self._set(continuous_window, "targetDistance", 4.0)
+        self._set(continuous_window, "targetRelY", 5.0)
+        out = self._predict(continuous_window, categorical_window)
 
         jump = self._bin(out, "inputJump")
         passed = jump >= self.args.high_prob
         return self._ok(passed, "Step 5 - Obstacle Jumping", f"jump={jump:.3f}, threshold={self.args.high_prob:.2f}")
 
     def scenario_drinking_potion(self) -> ScenarioResult:
-        window = self.make_neutral_window()
-        self._set(window, "health", 4.0)
-        self._set(window, "targetDistance", 30.0)
-        out = self._predict(window)
+        continuous_window, categorical_window = self.make_neutral_window()
+        self._set(continuous_window, "health", 4.0)
+        self._set(continuous_window, "targetDistance", 30.0)
+        self._set_inventory_item(categorical_window, self.args.drink_slot, self.potion_item_id)
+        out = self._predict(continuous_window, categorical_window)
 
         slot = self._slot(out)
         rmb = self._bin(out, "inputRmb")
@@ -165,11 +199,12 @@ class ScenarioRunner:
         )
 
     def scenario_splash_potion_attack(self) -> ScenarioResult:
-        window = self.make_neutral_window()
-        self._set(window, "health", 12.0)
-        self._set(window, "targetDistance", 6.0)
-        self._set(window, "targetRelX", 2.0)
-        out = self._predict(window)
+        continuous_window, categorical_window = self.make_neutral_window()
+        self._set(continuous_window, "health", 12.0)
+        self._set(continuous_window, "targetDistance", 6.0)
+        self._set(continuous_window, "targetRelX", 2.0)
+        self._set_inventory_item(categorical_window, self.args.splash_slot, self.splash_potion_item_id)
+        out = self._predict(continuous_window, categorical_window)
 
         slot = self._slot(out)
         rmb = self._bin(out, "inputRmb")
@@ -182,10 +217,11 @@ class ScenarioRunner:
         )
 
     def scenario_splash_potion_self_heal(self) -> ScenarioResult:
-        window = self.make_neutral_window()
-        self._set(window, "health", 2.0)
-        self._set(window, "targetDistance", 3.0)
-        out = self._predict(window)
+        continuous_window, categorical_window = self.make_neutral_window()
+        self._set(continuous_window, "health", 2.0, final_only=False)
+        self._set(continuous_window, "targetDistance", 3.0)
+        self._set_inventory_item(categorical_window, self.args.splash_slot, self.splash_potion_item_id)
+        out = self._predict(continuous_window, categorical_window)
 
         slot = self._slot(out)
         rmb = self._bin(out, "inputRmb")
@@ -207,10 +243,11 @@ class ScenarioRunner:
     def scenario_food_eating(self) -> ScenarioResult:
         self._expect_feature("foodLevel", "food_level_signal")
 
-        window = self.make_neutral_window()
-        self._set(window, "health", 13.0)
-        self._set(window, "targetDistance", 25.0)
-        out = self._predict(window)
+        continuous_window, categorical_window = self.make_neutral_window()
+        self._set(continuous_window, "health", 13.0)
+        self._set(continuous_window, "targetDistance", 25.0)
+        self._set_inventory_item(categorical_window, self.args.food_slot, self.food_item_id)
+        out = self._predict(continuous_window, categorical_window)
 
         slot = self._slot(out)
         rmb = self._bin(out, "inputRmb")
@@ -222,12 +259,13 @@ class ScenarioRunner:
         )
 
     def scenario_golden_apple_prebuff(self) -> ScenarioResult:
-        window = self.make_neutral_window()
+        continuous_window, categorical_window = self.make_neutral_window()
         idx = self.feature_index.get("targetDistance")
         if idx is not None:
-            window[:, idx] = np.linspace(30.0, 10.0, WINDOW_SIZE, dtype=np.float32)
-        self._set(window, "targetVelZ", -1.0)
-        out = self._predict(window)
+            continuous_window[:, idx] = np.linspace(30.0, 10.0, WINDOW_SIZE, dtype=np.float32)
+        self._set(continuous_window, "targetVelZ", -1.0)
+        self._set_inventory_item(categorical_window, self.args.golden_apple_slot, self.golden_apple_item_id)
+        out = self._predict(continuous_window, categorical_window)
 
         slot = self._slot(out)
         rmb = self._bin(out, "inputRmb")
@@ -241,15 +279,17 @@ class ScenarioRunner:
     def scenario_sprint_reset(self) -> ScenarioResult:
         self._expect_feature("damageDealt", "damage_dealt_signal")
 
-        first = self.make_neutral_window()
-        self._set(first, "targetDistance", 2.0)
-        self._set(first, "targetRelZ", 1.0)
-        out1 = self._predict(first)
+        first_continuous, first_categorical = self.make_neutral_window()
+        self._set(first_continuous, "targetDistance", 2.0)
+        self._set(first_continuous, "targetRelZ", 1.0)
+        self._set(first_continuous, "targetHealth", 20.0)
+        out1 = self._predict(first_continuous, first_categorical)
 
-        second = self.make_neutral_window()
-        self._set(second, "targetDistance", 2.5)
-        self._set(second, "targetRelZ", 1.0)
-        out2 = self._predict(second)
+        second_continuous, second_categorical = self.make_neutral_window()
+        self._set(second_continuous, "targetDistance", 2.5)
+        self._set(second_continuous, "targetRelZ", 1.0)
+        self._set(second_continuous, "targetHealth", 18.0)
+        out2 = self._predict(second_continuous, second_categorical)
 
         sprint_1 = self._bin(out1, "inputSprint")
         sprint_2 = self._bin(out2, "inputSprint")
@@ -265,20 +305,21 @@ class ScenarioRunner:
             (
                 f"sprint: {sprint_1:.3f}->{sprint_2:.3f}, "
                 f"forward: {forward_1:.3f}->{forward_2:.3f}, "
+                "targetHealth: 20.0->18.0, "
                 f"drop<={self.args.drop_prob:.2f}, rise>={self.args.rise_prob:.2f}"
             ),
         )
 
     def scenario_block_hitting(self) -> ScenarioResult:
-        first = self.make_neutral_window()
-        self._set(first, "targetDistance", 2.0)
-        self._set(first, "targetRelX", -1.0)
-        out1 = self._predict(first)
+        first_continuous, first_categorical = self.make_neutral_window()
+        self._set(first_continuous, "targetDistance", 2.0)
+        self._set(first_continuous, "targetRelX", -1.0)
+        out1 = self._predict(first_continuous, first_categorical)
 
-        second = self.make_neutral_window()
-        self._set(second, "targetDistance", 2.0)
-        self._set(second, "targetRelX", 1.0)
-        out2 = self._predict(second)
+        second_continuous, second_categorical = self.make_neutral_window()
+        self._set(second_continuous, "targetDistance", 2.0)
+        self._set(second_continuous, "targetRelX", 1.0)
+        out2 = self._predict(second_continuous, second_categorical)
 
         lmb1 = self._bin(out1, "inputLmb")
         rmb1 = self._bin(out1, "inputRmb")
@@ -299,15 +340,18 @@ class ScenarioRunner:
         )
 
     def scenario_projectile_dodging(self) -> ScenarioResult:
-        self._expect_feature("nearestProjectileDeltaX", "projectile_tracking_signal")
-        self._expect_feature("nearestProjectileDeltaY", "projectile_tracking_signal")
-        self._expect_feature("nearestProjectileDeltaZ", "projectile_tracking_signal")
+        self._expect_feature("nearestProjectileDx", "projectile_tracking_signal")
+        self._expect_feature("nearestProjectileDy", "projectile_tracking_signal")
+        self._expect_feature("nearestProjectileDz", "projectile_tracking_signal")
 
-        window = self.make_neutral_window()
-        self._set(window, "targetDistance", 12.0)
-        self._set(window, "targetRelX", 4.0)
-        self._set(window, "targetRelZ", 8.0)
-        out = self._predict(window)
+        continuous_window, categorical_window = self.make_neutral_window()
+        self._set(continuous_window, "targetDistance", 12.0)
+        self._set(continuous_window, "targetRelX", 4.0)
+        self._set(continuous_window, "targetRelZ", 8.0)
+        self._set(continuous_window, "nearestProjectileDx", -1.5)
+        self._set(continuous_window, "nearestProjectileDy", 0.3)
+        self._set(continuous_window, "nearestProjectileDz", 2.0)
+        out = self._predict(continuous_window, categorical_window)
 
         move_left = self._bin(out, "inputLeft")
         move_right = self._bin(out, "inputRight")
@@ -327,6 +371,12 @@ def parse_args() -> argparse.Namespace:
         default=CHECKPOINTS_DIR / "phase4_best_weights.npz",
         help="Path to the trained MLX checkpoint (.npz).",
     )
+    parser.add_argument(
+        "--item-vocab",
+        type=Path,
+        default=EXPORTS_DIR / "phase2_item_vocabulary.json",
+        help="Path to the Phase 2 exported item vocabulary JSON.",
+    )
     parser.add_argument("--high-prob", type=float, default=0.8)
     parser.add_argument("--drop-prob", type=float, default=0.1)
     parser.add_argument("--rise-prob", type=float, default=0.9)
@@ -343,10 +393,41 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_model(checkpoint_path: Path) -> PvPSequenceModel:
+def load_item_vocabulary(item_vocab_path: Path) -> dict[str, int]:
+    with item_vocab_path.open("r", encoding="utf-8") as handle:
+        raw_vocabulary = json.load(handle)
+
+    if not isinstance(raw_vocabulary, dict):
+        raise ValueError(f"Item vocabulary must be a JSON object: {item_vocab_path}")
+
+    vocabulary: dict[str, int] = {}
+    for key, value in raw_vocabulary.items():
+        vocabulary[str(key)] = int(value)
+    return vocabulary
+
+
+def infer_checkpoint_item_vocab_size(checkpoint_path: Path) -> int | None:
+    with np.load(checkpoint_path, allow_pickle=False) as weights:
+        embedding = weights.get("item_embedding.weight")
+        if embedding is None:
+            return None
+        return int(embedding.shape[0])
+
+
+def build_model(checkpoint_path: Path, item_vocabulary: dict[str, int]) -> PvPSequenceModel:
+    checkpoint_vocab_size = infer_checkpoint_item_vocab_size(checkpoint_path)
+    vocabulary_id_span = max(item_vocabulary.values(), default=0) + 1
+    effective_vocab_size = max(
+        len(item_vocabulary),
+        vocabulary_id_span,
+        checkpoint_vocab_size or 0,
+    )
+
     model = PvPSequenceModel(
         input_feature_count=len(INPUT_COLUMNS),
         boolean_action_count=len(BINARY_ACTION_COLUMNS),
+        item_slot_count=INVENTORY_SLOT_COUNT,
+        item_vocabulary_size=effective_vocab_size,
     )
     model.load_weights(str(checkpoint_path), strict=True)
     model.eval()
@@ -357,10 +438,20 @@ def main() -> int:
     args = parse_args()
     if not args.checkpoint.exists():
         raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
+    if not args.item_vocab.exists():
+        raise FileNotFoundError(f"Item vocabulary not found: {args.item_vocab}")
 
-    model = build_model(args.checkpoint)
+    item_vocabulary = load_item_vocabulary(args.item_vocab)
+    checkpoint_vocab_size = infer_checkpoint_item_vocab_size(args.checkpoint)
+    if checkpoint_vocab_size is not None and checkpoint_vocab_size != len(item_vocabulary):
+        print(
+            "[WARN] Item vocabulary entry count does not match checkpoint embedding rows: "
+            f"vocab={len(item_vocabulary)} vs checkpoint={checkpoint_vocab_size}. "
+            "Using checkpoint-compatible model size while preserving vocabulary IDs for scenario mocks."
+        )
+    model = build_model(args.checkpoint, item_vocabulary)
 
-    runner = ScenarioRunner(model=model, args=args)
+    runner = ScenarioRunner(model=model, args=args, item_vocabulary=item_vocabulary)
     checks: list[Callable[[], ScenarioResult]] = [
         runner.scenario_chasing_enemy,
         runner.scenario_melee_combat,
@@ -376,9 +467,16 @@ def main() -> int:
         runner.scenario_projectile_dodging,
     ]
 
-    # Step 1 helper validation: ensure neutral mock windows have shape [20, feature_count].
-    neutral = runner.make_neutral_window()
-    assert neutral.shape == (WINDOW_SIZE, len(INPUT_COLUMNS)), "Neutral window helper must return 20-frame windows"
+    # Step 1 helper validation: ensure neutral mock windows have expected dual-input shapes.
+    neutral_continuous, neutral_categorical = runner.make_neutral_window()
+    assert neutral_continuous.shape == (
+        WINDOW_SIZE,
+        len(INPUT_COLUMNS),
+    ), "Continuous neutral window helper must return 20-frame windows"
+    assert neutral_categorical.shape == (
+        WINDOW_SIZE,
+        INVENTORY_SLOT_COUNT,
+    ), "Categorical neutral window helper must return 20x38 windows"
 
     results = [check() for check in checks]
 

@@ -136,3 +136,32 @@ python3 scripts/train_model.py \
 
 The trainer splits windows by `match_id`, uses an 80/20 train/validation split, and saves the best checkpoint only when validation loss improves.
 
+## Phase 4 scenario tests
+
+Run scenario-based checks against a trained checkpoint (dual input: continuous windows + mock inventory windows):
+
+```bash
+python3 scripts/assert_phase4_scenarios.py \
+  --checkpoint models/checkpoints/phase4_best_weights.npz \
+  --item-vocab models/exports/phase2_item_vocabulary.json \
+  --allow-failures
+```
+
+Useful options:
+
+- `--allow-failures`: print all scenario results and exit with code `0` even if checks fail.
+- `--high-prob`, `--drop-prob`, `--rise-prob`, `--very-large-positive-pitch`: tune assertion thresholds.
+- `--drink-slot`, `--splash-slot`, `--food-slot`, `--golden-apple-slot`: override expected hotbar slot indices.
+
+Quick run that never fails CI locally:
+
+```bash
+python3 scripts/assert_phase4_scenarios.py --allow-failures
+```
+
+Output format:
+
+- Each scenario prints one line like `[PASS] Step X - ...` or `[FAIL] Step X - ...`.
+- The script ends with `Completed <N> scenario checks with <M> failure(s).`.
+- Without `--allow-failures`, any failed scenario raises an assertion and returns a non-zero exit code.
+

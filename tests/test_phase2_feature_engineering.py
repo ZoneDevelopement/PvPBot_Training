@@ -37,6 +37,8 @@ def _mock_dataframe(row_count: int = 3) -> pd.DataFrame:
 
     data = {
         "health": np.linspace(20, 10, row_count),
+        "foodLevel": np.linspace(20, 12, row_count),
+        "damageDealt": np.linspace(0, 6, row_count),
         "posX": np.arange(row_count),
         "posY": np.arange(row_count) + 64,
         "posZ": np.arange(row_count) + 100,
@@ -50,6 +52,9 @@ def _mock_dataframe(row_count: int = 3) -> pd.DataFrame:
         "targetRelX": np.linspace(1.0, 2.0, row_count),
         "targetRelY": np.linspace(-0.5, 0.5, row_count),
         "targetRelZ": np.linspace(0.5, 1.5, row_count),
+        "nearestProjectileDx": np.linspace(-2.0, -1.0, row_count),
+        "nearestProjectileDy": np.linspace(0.5, 1.5, row_count),
+        "nearestProjectileDz": np.linspace(4.0, 2.0, row_count),
         "targetYaw": np.linspace(20, 40, row_count),
         "targetPitch": np.linspace(-10, 10, row_count),
         "targetVelX": np.linspace(0.0, 0.4, row_count),
@@ -144,6 +149,8 @@ def test_normalizer_applies_fixed_minecraft_scaling() -> None:
     feature_idx = {name: idx for idx, name in enumerate(INPUT_COLUMNS)}
 
     assert np.isclose(scaled[0, feature_idx["health"]], 1.0)
+    assert np.isclose(scaled[0, feature_idx["foodLevel"]], 1.0)
+    assert np.isclose(scaled[0, feature_idx["damageDealt"]], 0.0)
     assert np.isclose(scaled[0, feature_idx["targetHealth"]], 1.0)
     assert np.isclose(scaled[0, feature_idx["yaw"]], 10.0 / 180.0)
     assert np.isclose(scaled[0, feature_idx["pitch"]], 5.0 / 90.0)
@@ -152,6 +159,7 @@ def test_normalizer_applies_fixed_minecraft_scaling() -> None:
     assert np.isclose(scaled[0, feature_idx["targetVelX"]], 0.0)
     assert np.isclose(scaled[0, feature_idx["posZ"]], 1.0)
     assert np.isclose(scaled[0, feature_idx["targetRelY"]], -0.5 / 50.0)
+    assert np.isclose(scaled[0, feature_idx["nearestProjectileDx"]], -2.0 / 50.0)
 
 
 def test_sequence_generator_creates_expected_window_count() -> None:
