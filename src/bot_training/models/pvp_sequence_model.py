@@ -42,7 +42,7 @@ class PvPSequenceModel(nn.Module):
         self.input_projection = nn.Linear(input_feature_count, hidden_dim)
         self.item_embedding = nn.Embedding(item_vocabulary_size, item_embedding_dim)
         self.item_projection = nn.Linear(item_slot_count * item_embedding_dim, hidden_dim)
-        self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(0.4)
         self.transformer_encoder = nn.TransformerEncoder(
             num_layers=num_layers,
             dims=hidden_dim,

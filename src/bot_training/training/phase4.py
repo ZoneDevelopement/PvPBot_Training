@@ -296,7 +296,7 @@ def train_phase4_model(
     checkpoint_path: Path | None = None,
 ) -> TrainResult:
     split = split_dataset_by_match(dataset, train_ratio=1.0 - validation_ratio, seed=seed)
-    optimizer = optim.AdamW(learning_rate=learning_rate, weight_decay=0.01)
+    optimizer = optim.AdamW(learning_rate=learning_rate, weight_decay=0.05)
     loss_and_grad_fn = nn.value_and_grad(model, _mx_total_loss)
     max_epochs = max(1, min(int(epochs), MAX_EPOCHS))
     has_validation = split.validation.inputs.shape[0] > 0
