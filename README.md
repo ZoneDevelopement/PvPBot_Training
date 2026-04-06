@@ -168,7 +168,7 @@ python3 scripts/rebuild_phase2_and_train_phase4.py \
   --input-pattern "*_clean.csv" \
   --epochs 50 \
   --batch-size 256 \
-  --learning-rate 0.001
+  --learning-rate 0.0001
 ```
 
 Optional quick subset run while debugging:

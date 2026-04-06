@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--window-size", type=int, default=20)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--learning-rate", type=float, default=0.001)
+    parser.add_argument("--learning-rate", type=float, default=0.0001)
     parser.add_argument("--validation-ratio", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
