@@ -263,9 +263,8 @@ def process_phase1_csv_file(
 
     result = Phase1Result(files_processed=1)
     next_match_id = start_match_id
-    current_match_rows: list[dict[str, object]] = []
-    previous_player: object | None = None
-    previous_timestamp: float | None = None
+    active_matches: dict[str, list[dict[str, object]]] = {}
+    previous_timestamps: dict[str, float] = {}
     chunk_counter = 0
 
     output_handle: TextIO | None = None
@@ -309,29 +308,34 @@ def process_phase1_csv_file(
                 except ValueError:
                     continue
 
+                # Fetch or initialize this player's match buffer and last timestamp
+                player_key = str(row_player).strip()
+                player_match_rows = active_matches.get(player_key, [])
+                player_previous_timestamp = previous_timestamps.get(player_key)
+
                 should_start_new_match = (
-                    not current_match_rows
-                    or (config.split_on_player_change and row_player != previous_player)
-                    or previous_timestamp is None
-                    or row_timestamp < previous_timestamp
-                    or (row_timestamp - previous_timestamp) > config.timestamp_gap
+                    not player_match_rows
+                    or (config.split_on_player_change and row_player != player_key)
+                    or player_previous_timestamp is None
+                    or row_timestamp < player_previous_timestamp
+                    or (row_timestamp - player_previous_timestamp) > config.timestamp_gap
                 )
 
-                if should_start_new_match and current_match_rows:
+                if should_start_new_match and player_match_rows:
                     result.candidate_matches += 1
-                    metrics = summarize_match_candidate(current_match_rows, config)
+                    metrics = summarize_match_candidate(player_match_rows, config)
                     if match_passes_filters(metrics, config):
-                        current_writer = ensure_writer(list(current_match_rows[0].keys()))
-                        _write_match(current_writer, current_match_rows, next_match_id)
+                        current_writer = ensure_writer(list(player_match_rows[0].keys()))
+                        _write_match(current_writer, player_match_rows, next_match_id)
                         next_match_id += 1
                         result.kept_matches += 1
                     else:
                         _apply_rejection_reasons(result, match_rejection_reasons(metrics, config))
-                    current_match_rows = []
+                    player_match_rows = []
 
-                current_match_rows.append(row)
-                previous_player = row_player
-                previous_timestamp = row_timestamp
+                player_match_rows.append(row)
+                active_matches[player_key] = player_match_rows
+                previous_timestamps[player_key] = row_timestamp
 
             if progress_callback is not None and chunk_counter % max(progress_every_chunks, 1) == 0:
                 progress_callback(
@@ -347,16 +351,18 @@ def process_phase1_csv_file(
                     )
                 )
 
-        if current_match_rows:
-            result.candidate_matches += 1
-            metrics = summarize_match_candidate(current_match_rows, config)
-            if match_passes_filters(metrics, config):
-                current_writer = ensure_writer(list(current_match_rows[0].keys()))
-                _write_match(current_writer, current_match_rows, next_match_id)
-                next_match_id += 1
-                result.kept_matches += 1
-            else:
-                _apply_rejection_reasons(result, match_rejection_reasons(metrics, config))
+        # Process any remaining match buffers for all players
+        for player_key, player_match_rows in active_matches.items():
+            if player_match_rows:
+                result.candidate_matches += 1
+                metrics = summarize_match_candidate(player_match_rows, config)
+                if match_passes_filters(metrics, config):
+                    current_writer = ensure_writer(list(player_match_rows[0].keys()))
+                    _write_match(current_writer, player_match_rows, next_match_id)
+                    next_match_id += 1
+                    result.kept_matches += 1
+                else:
+                    _apply_rejection_reasons(result, match_rejection_reasons(metrics, config))
     finally:
         if output_handle is not None:
             cast(TextIO, output_handle).close()
