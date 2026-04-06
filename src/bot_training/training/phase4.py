@@ -152,21 +152,21 @@ def iter_batches(
 ) -> Iterator[SequenceDataset]:
     """Yield minibatches for one epoch."""
     indices = np.arange(dataset.inputs.shape[0])
-    hotbar_permutation: np.ndarray | None = None
-    hotbar_inverse_permutation: np.ndarray | None = None
+    rng: np.random.Generator | None = None
     if shuffle:
         rng = np.random.default_rng(seed)
         rng.shuffle(indices)
-        hotbar_permutation = rng.permutation(9)
-        hotbar_inverse_permutation = np.empty(9, dtype=np.int32)
-        hotbar_inverse_permutation[hotbar_permutation] = np.arange(9, dtype=np.int32)
 
     for start in range(0, indices.size, batch_size):
         batch_indices = indices[start : start + batch_size]
         batch = _take_indices(dataset, batch_indices)
-        if hotbar_permutation is None or hotbar_inverse_permutation is None:
+        if not shuffle or rng is None:
             yield batch
             continue
+
+        hotbar_permutation = rng.permutation(9)
+        hotbar_inverse_permutation = np.empty(9, dtype=np.int32)
+        hotbar_inverse_permutation[hotbar_permutation] = np.arange(9, dtype=np.int32)
 
         # Hotbar augmentation: shuffle first 9 categorical slots across every frame in each window.
         categorical_inputs = np.array(batch.categorical_inputs, copy=True)
