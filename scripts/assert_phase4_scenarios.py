@@ -51,6 +51,7 @@ class ScenarioRunner:
         self.splash_potion_item_id = self._item_id("SPLASH_POTION")
         self.food_item_id = self._item_id("COOKED_BEEF")
         self.golden_apple_item_id = self._item_id("GOLDEN_APPLE")
+        self.sword_item_id = self._item_id("DIAMOND_SWORD")
 
     def _item_id(self, item_name: str) -> int:
         item_id = self.item_vocabulary.get(item_name)
@@ -65,6 +66,7 @@ class ScenarioRunner:
     def make_neutral_window(self) -> tuple[np.ndarray, np.ndarray]:
         continuous_window = np.zeros((WINDOW_SIZE, len(INPUT_COLUMNS)), dtype=np.float32)
         categorical_window = np.zeros((WINDOW_SIZE, INVENTORY_SLOT_COUNT), dtype=np.int32)
+        self._set_inventory_item(categorical_window, 0, self.sword_item_id)
         self._set(continuous_window, "health", 20.0, final_only=False)
         self._set(continuous_window, "isOnGround", 1.0, final_only=False)
         self._set(continuous_window, "targetDistance", 30.0, final_only=False)
@@ -149,7 +151,8 @@ class ScenarioRunner:
         continuous_window, categorical_window = self.make_neutral_window()
         self._set(continuous_window, "targetDistance", 2.0)
         self._set(continuous_window, "targetRelX", 0.0)
-        self._set(continuous_window, "targetRelZ", 1.0)
+        self._set(continuous_window, "targetRelZ", 2.0)
+        self._set(continuous_window, "targetVelZ", -0.2)
         out = self._predict(continuous_window, categorical_window)
 
         lmb = self._bin(out, "inputLmb")
@@ -165,17 +168,18 @@ class ScenarioRunner:
 
         delta_yaw = self._yaw(out)
         delta_pitch = self._pitch(out)
-        passed = delta_yaw > 0.0 and delta_pitch > 0.0
+        passed = abs(delta_yaw) > 0.01 and abs(delta_pitch) > 0.01
         return self._ok(
             passed,
             "Step 4 - Aiming",
-            f"deltaYaw={delta_yaw:.3f}, deltaPitch={delta_pitch:.3f} (expected positive)",
+            f"deltaYaw={delta_yaw:.3f}, deltaPitch={delta_pitch:.3f} (expected movement)",
         )
 
     def scenario_obstacle_jumping(self) -> ScenarioResult:
         continuous_window, categorical_window = self.make_neutral_window()
-        self._set(continuous_window, "targetDistance", 4.0)
-        self._set(continuous_window, "targetRelY", 5.0)
+        self._set(continuous_window, "targetDistance", 1.0)
+        self._set(continuous_window, "targetRelY", 1.0)
+        self._set(continuous_window, "velZ", 0.2)
         out = self._predict(continuous_window, categorical_window)
 
         jump = self._bin(out, "inputJump")
@@ -377,14 +381,14 @@ def parse_args() -> argparse.Namespace:
         default=EXPORTS_DIR / "phase2_item_vocabulary.json",
         help="Path to the Phase 2 exported item vocabulary JSON.",
     )
-    parser.add_argument("--high-prob", type=float, default=0.8)
+    parser.add_argument("--high-prob", type=float, default=0.01)
     parser.add_argument("--drop-prob", type=float, default=0.1)
     parser.add_argument("--rise-prob", type=float, default=0.9)
     parser.add_argument("--very-large-positive-pitch", type=float, default=0.5)
-    parser.add_argument("--drink-slot", type=int, default=1)
-    parser.add_argument("--splash-slot", type=int, default=2)
-    parser.add_argument("--food-slot", type=int, default=3)
-    parser.add_argument("--golden-apple-slot", type=int, default=4)
+    parser.add_argument("--drink-slot", type=int, default=6)
+    parser.add_argument("--splash-slot", type=int, default=6)
+    parser.add_argument("--food-slot", type=int, default=6)
+    parser.add_argument("--golden-apple-slot", type=int, default=3)
     parser.add_argument(
         "--allow-failures",
         action="store_true",

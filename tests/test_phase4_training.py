@@ -115,6 +115,36 @@ def test_batch_iterator_obeys_batch_size() -> None:
     assert batches[2].inputs.shape[0] == 2
 
 
+def test_batch_iterator_hotbar_shuffle_remaps_slot_targets() -> None:
+    sample_count = 1
+    windows = np.zeros((sample_count, WINDOW_SIZE, FEATURE_COUNT), dtype=np.float32)
+    categorical_windows = np.zeros((sample_count, WINDOW_SIZE, CATEGORICAL_FEATURE_COUNT), dtype=np.int32)
+    original_hotbar = np.arange(100, 109, dtype=np.int32)
+    categorical_windows[0, :, :9] = original_hotbar
+
+    binary_targets = np.zeros((sample_count, BOOLEAN_ACTION_COUNT), dtype=np.float32)
+    original_slot_target = np.array([4], dtype=np.int32)
+    continuous_targets = np.zeros((sample_count, 2), dtype=np.float32)
+    match_ids = np.asarray(["match_0"], dtype=object)
+    dataset = SequenceDataset(
+        inputs=windows,
+        categorical_inputs=categorical_windows,
+        binary_targets=binary_targets,
+        slot_targets=original_slot_target,
+        continuous_targets=continuous_targets,
+        match_ids=match_ids,
+    )
+
+    batch = next(iter(iter_batches(dataset, batch_size=1, shuffle=True, seed=11)))
+
+    for frame_index in range(WINDOW_SIZE):
+        assert np.array_equal(np.sort(batch.categorical_inputs[0, frame_index, :9]), original_hotbar)
+
+    original_item_id = categorical_windows[0, 0, original_slot_target[0]]
+    remapped_slot = int(batch.slot_targets[0])
+    assert np.all(batch.categorical_inputs[0, :, remapped_slot] == original_item_id)
+
+
 def test_gradient_updates_reduce_loss_on_a_single_batch() -> None:
     dataset = _make_synthetic_dataset(sample_count=64)
     model = _make_model()

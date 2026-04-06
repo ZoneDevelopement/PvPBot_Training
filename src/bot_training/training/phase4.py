@@ -152,13 +152,37 @@ def iter_batches(
 ) -> Iterator[SequenceDataset]:
     """Yield minibatches for one epoch."""
     indices = np.arange(dataset.inputs.shape[0])
+    hotbar_permutation: np.ndarray | None = None
+    hotbar_inverse_permutation: np.ndarray | None = None
     if shuffle:
         rng = np.random.default_rng(seed)
         rng.shuffle(indices)
+        hotbar_permutation = rng.permutation(9)
+        hotbar_inverse_permutation = np.empty(9, dtype=np.int32)
+        hotbar_inverse_permutation[hotbar_permutation] = np.arange(9, dtype=np.int32)
 
     for start in range(0, indices.size, batch_size):
         batch_indices = indices[start : start + batch_size]
-        yield _take_indices(dataset, batch_indices)
+        batch = _take_indices(dataset, batch_indices)
+        if hotbar_permutation is None or hotbar_inverse_permutation is None:
+            yield batch
+            continue
+
+        # Hotbar augmentation: shuffle first 9 categorical slots across every frame in each window.
+        categorical_inputs = np.array(batch.categorical_inputs, copy=True)
+        categorical_inputs[:, :, :9] = categorical_inputs[:, :, hotbar_permutation]
+
+        # Remap slot targets so they still point to the original selected item after shuffling.
+        slot_targets = hotbar_inverse_permutation[batch.slot_targets.astype(np.int32, copy=False)]
+
+        yield SequenceDataset(
+            inputs=batch.inputs,
+            categorical_inputs=categorical_inputs,
+            binary_targets=batch.binary_targets,
+            slot_targets=slot_targets.astype(np.int32, copy=False),
+            continuous_targets=batch.continuous_targets,
+            match_ids=batch.match_ids,
+        )
 
 
 def binary_cross_entropy(predictions: np.ndarray, targets: np.ndarray) -> float:

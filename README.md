@@ -136,6 +136,47 @@ python3 scripts/train_model.py \
 
 The trainer splits windows by `match_id`, uses an 80/20 train/validation split, and saves the best checkpoint only when validation loss improves.
 
+## Rebuild Phase 2 + retrain Phase 4 (one command)
+
+Use this helper script when you want to erase generated Phase 2 and Phase 4 artifacts, rebuild Phase 2 tensors, and retrain the model end-to-end.
+
+What it deletes before rebuilding:
+
+- `data/processed/phase2_feature_tensors_per_file/`
+- `data/processed/phase2_feature_manifest.json`
+- `data/processed/phase2_feature_tensors.npz` (single-file artifact if present)
+- `models/exports/phase2_item_vocabulary.json`
+- `models/checkpoints/phase4_best_weights.npz`
+
+Run a safe preview first:
+
+```bash
+python3 scripts/rebuild_phase2_and_train_phase4.py --dry-run
+```
+
+Run the full rebuild + retrain:
+
+```bash
+python3 scripts/rebuild_phase2_and_train_phase4.py
+```
+
+Common overrides:
+
+```bash
+python3 scripts/rebuild_phase2_and_train_phase4.py \
+  --input-dir data/processed/phase1_clean_matches_per_file \
+  --input-pattern "*_clean.csv" \
+  --epochs 50 \
+  --batch-size 256 \
+  --learning-rate 0.001
+```
+
+Optional quick subset run while debugging:
+
+```bash
+python3 scripts/rebuild_phase2_and_train_phase4.py --max-files 100 --epochs 5
+```
+
 ## Phase 4 scenario tests
 
 Run scenario-based checks against a trained checkpoint (dual input: continuous windows + mock inventory windows):
