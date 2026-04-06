@@ -30,6 +30,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=0.001)
     parser.add_argument("--validation-ratio", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume training by loading existing checkpoint weights when available.",
+    )
     return parser.parse_args()
 
 def main() -> int:
@@ -48,6 +53,10 @@ def main() -> int:
         input_feature_count=expected_feature_count,
         boolean_action_count=9,
     )
+    if args.resume and args.checkpoint.exists():
+        model.load_weights(str(args.checkpoint), strict=True)
+        print(f"Resuming training from checkpoint: {args.checkpoint.resolve()}")
+
     result = train_phase4_model(
         dataset,
         model,

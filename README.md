@@ -136,6 +136,18 @@ python3 scripts/train_model.py \
 
 The trainer splits windows by `match_id`, uses an 80/20 train/validation split, and saves the best checkpoint only when validation loss improves.
 
+To continue training from an existing checkpoint, pass `--resume`. If the checkpoint file exists, the model loads those weights before running new epochs.
+
+```bash
+python3 scripts/train_model.py \
+  --dataset data/processed/phase2_feature_tensors_per_file \
+  --checkpoint models/checkpoints/phase4_best_weights.npz \
+  --resume \
+  --epochs 20 \
+  --batch-size 256 \
+  --learning-rate 0.001
+```
+
 ## Rebuild Phase 2 + retrain Phase 4 (one command)
 
 Use this helper script when you want to erase generated Phase 2 and Phase 4 artifacts, rebuild Phase 2 tensors, and retrain the model end-to-end.
