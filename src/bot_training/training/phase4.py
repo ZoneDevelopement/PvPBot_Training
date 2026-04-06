@@ -229,7 +229,7 @@ def _mx_total_loss(
     epsilon = 1e-7
     binary_probs = mx.clip(outputs["binary_probabilities"], epsilon, 1.0 - epsilon)
     bce = -mx.mean(
-        binary_targets * mx.log(binary_probs)
+        10.0 * binary_targets * mx.log(binary_probs)
         + (1.0 - binary_targets) * mx.log(1.0 - binary_probs)
     )
 
@@ -296,7 +296,7 @@ def train_phase4_model(
     checkpoint_path: Path | None = None,
 ) -> TrainResult:
     split = split_dataset_by_match(dataset, train_ratio=1.0 - validation_ratio, seed=seed)
-    optimizer = optim.AdamW(learning_rate=learning_rate, weight_decay=0.05)
+    optimizer = optim.AdamW(learning_rate=learning_rate, weight_decay=0.0001)
     loss_and_grad_fn = nn.value_and_grad(model, _mx_total_loss)
     max_epochs = max(1, min(int(epochs), MAX_EPOCHS))
     has_validation = split.validation.inputs.shape[0] > 0
