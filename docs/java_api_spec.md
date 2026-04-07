@@ -8,6 +8,9 @@ The inference server exposes:
 
 Your Java bot integration should send **one request every 50 ms** (one Minecraft tick) per bot.
 
+The Python server performs preprocessing internally (relative coordinates, Euclidean distance,
+yaw wrapping for frame-to-frame deltas, and vocabulary mapping), so Java should send raw Bukkit state.
+
 ## Request Schema (`GameState`)
 
 Send JSON with the exact fields below.
@@ -17,84 +20,87 @@ Send JSON with the exact fields below.
   "type": "object",
   "required": [
     "bot_id",
-    "health",
-    "foodLevel",
-    "damageDealt",
-    "velX",
-    "velY",
-    "velZ",
-    "yaw",
-    "pitch",
-    "isOnGround",
-    "targetDistance",
-    "targetRelX",
-    "targetRelY",
-    "targetRelZ",
-    "nearestProjectileDx",
-    "nearestProjectileDy",
-    "nearestProjectileDz",
-    "targetYaw",
-    "targetPitch",
-    "targetVelX",
-    "targetVelY",
-    "targetVelZ",
-    "targetHealth",
-    "mainHandItem",
-    "offHandItem",
-    "hotbar0",
-    "hotbar1",
-    "hotbar2",
-    "hotbar3",
-    "hotbar4",
-    "hotbar5",
-    "hotbar6",
-    "hotbar7",
-    "hotbar8",
-    "inventoryBag"
+    "bot",
+    "target",
+    "inventory"
   ],
   "properties": {
     "bot_id": { "type": "string" },
 
-    "health": { "type": "number" },
-    "foodLevel": { "type": "number" },
-    "damageDealt": { "type": "number" },
-    "velX": { "type": "number" },
-    "velY": { "type": "number" },
-    "velZ": { "type": "number" },
-    "yaw": { "type": "number" },
-    "pitch": { "type": "number" },
-    "isOnGround": { "type": "boolean" },
-    "targetDistance": { "type": "number" },
-    "targetRelX": { "type": "number" },
-    "targetRelY": { "type": "number" },
-    "targetRelZ": { "type": "number" },
-    "nearestProjectileDx": { "type": "number" },
-    "nearestProjectileDy": { "type": "number" },
-    "nearestProjectileDz": { "type": "number" },
-    "targetYaw": { "type": "number" },
-    "targetPitch": { "type": "number" },
-    "targetVelX": { "type": "number" },
-    "targetVelY": { "type": "number" },
-    "targetVelZ": { "type": "number" },
-    "targetHealth": { "type": "number" },
+    "bot": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "z",
+        "yaw",
+        "pitch",
+        "vel_x",
+        "vel_y",
+        "vel_z",
+        "health",
+        "food",
+        "is_on_ground"
+      ],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" },
+        "yaw": { "type": "number" },
+        "pitch": { "type": "number" },
+        "vel_x": { "type": "number" },
+        "vel_y": { "type": "number" },
+        "vel_z": { "type": "number" },
+        "health": { "type": "number" },
+        "food": { "type": "number" },
+        "is_on_ground": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
 
-    "mainHandItem": { "type": "string" },
-    "offHandItem": { "type": "string" },
-    "hotbar0": { "type": "string" },
-    "hotbar1": { "type": "string" },
-    "hotbar2": { "type": "string" },
-    "hotbar3": { "type": "string" },
-    "hotbar4": { "type": "string" },
-    "hotbar5": { "type": "string" },
-    "hotbar6": { "type": "string" },
-    "hotbar7": { "type": "string" },
-    "hotbar8": { "type": "string" },
+    "target": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "z",
+        "yaw",
+        "pitch",
+        "vel_x",
+        "vel_y",
+        "vel_z",
+        "health"
+      ],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" },
+        "yaw": { "type": "number" },
+        "pitch": { "type": "number" },
+        "vel_x": { "type": "number" },
+        "vel_y": { "type": "number" },
+        "vel_z": { "type": "number" },
+        "health": { "type": "number" },
+        "food": { "type": "number" },
+        "is_on_ground": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
 
-    "inventoryBag": {
-      "type": "array",
-      "items": { "type": "string" },
-      "minItems": 27,
-      "maxItems": 27
+    "inventory": {
+      "type": "object",
+      "required": ["main_hand", "off_hand", "hotbar"],
+      "properties": {
+        "main_hand": { "type": "string" },
+        "off_hand": { "type": "string" },
+        "hotbar": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 9,
+          "maxItems": 9
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

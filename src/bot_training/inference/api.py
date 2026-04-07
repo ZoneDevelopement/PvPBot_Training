@@ -9,7 +9,7 @@ import mlx.core as mx
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 
 from bot_training.features.build_features import (
     BINARY_ACTION_COLUMNS,
@@ -27,61 +27,46 @@ ITEM_VOCAB_PATH = PROJECT_ROOT / "models" / "exports" / "phase2_item_vocabulary.
 
 app = FastAPI(title="PvP Sequence Model Inference API")
 
-# Rolling per-bot history buffers used to build 20-frame model windows.
+# Rolling per-bot processed frame buffers used to build 20-frame model windows.
 state_buffers: dict[str, list] = {}
 
 model: PvPSequenceModel | None = None
 item_vocabulary: dict[str, int] = {}
-unknown_item_id: int = 1
+air_item_id: int = 0
+
+
+class RawEntityState(BaseModel):
+    x: float
+    y: float
+    z: float
+    yaw: float
+    pitch: float
+    vel_x: float
+    vel_y: float
+    vel_z: float
+    health: float
+    food: float = 20.0
+    is_on_ground: bool = True
+
+
+class InventoryState(BaseModel):
+    main_hand: str
+    off_hand: str
+    hotbar: list[str]
+
+    @field_validator("hotbar")
+    @classmethod
+    def _validate_hotbar(cls, value: list[str]) -> list[str]:
+        if len(value) != 9:
+            raise ValueError("hotbar must contain exactly 9 item names")
+        return value
 
 
 class GameState(BaseModel):
     bot_id: str
-
-    # Continuous model inputs
-    health: float
-    foodLevel: float
-    damageDealt: float
-    velX: float
-    velY: float
-    velZ: float
-    yaw: float
-    pitch: float
-    isOnGround: bool
-    targetDistance: float
-    targetRelX: float
-    targetRelY: float
-    targetRelZ: float
-    nearestProjectileDx: float
-    nearestProjectileDy: float
-    nearestProjectileDz: float
-    targetYaw: float
-    targetPitch: float
-    targetVelX: float
-    targetVelY: float
-    targetVelZ: float
-    targetHealth: float
-
-    # Categorical inventory inputs (2 direct-hand + 9 hotbar + 27 bag slots = 38)
-    mainHandItem: str
-    offHandItem: str
-    hotbar0: str
-    hotbar1: str
-    hotbar2: str
-    hotbar3: str
-    hotbar4: str
-    hotbar5: str
-    hotbar6: str
-    hotbar7: str
-    hotbar8: str
-    inventoryBag: list[str] = Field(default_factory=lambda: [""] * 27)
-
-    @field_validator("inventoryBag")
-    @classmethod
-    def _validate_inventory_bag(cls, value: list[str]) -> list[str]:
-        if len(value) != 27:
-            raise ValueError("inventoryBag must contain exactly 27 item names")
-        return value
+    bot: RawEntityState
+    target: RawEntityState
+    inventory: InventoryState
 
 
 class BotPrediction(BaseModel):
@@ -119,60 +104,72 @@ def _normalize_item_name(name: str) -> str:
     return name.strip()
 
 
-def _state_to_continuous_row(state: GameState) -> list[float]:
-    return [
-        float(state.health),
-        float(state.foodLevel),
-        float(state.damageDealt),
-        float(state.velX),
-        float(state.velY),
-        float(state.velZ),
-        float(state.yaw),
-        float(state.pitch),
-        1.0 if state.isOnGround else 0.0,
-        float(state.targetDistance),
-        float(state.targetRelX),
-        float(state.targetRelY),
-        float(state.targetRelZ),
-        float(state.nearestProjectileDx),
-        float(state.nearestProjectileDy),
-        float(state.nearestProjectileDz),
-        float(state.targetYaw),
-        float(state.targetPitch),
-        float(state.targetVelX),
-        float(state.targetVelY),
-        float(state.targetVelZ),
-        float(state.targetHealth),
-    ]
+def _calculate_wrapped_yaw_delta(current_yaw: float, previous_yaw: float) -> float:
+    return ((current_yaw - previous_yaw + 180.0) % 360.0) - 180.0
+
+
+def _state_to_continuous_row(state: GameState) -> tuple[list[float], float, float]:
+    dx = float(state.target.x - state.bot.x)
+    dy = float(state.target.y - state.bot.y)
+    dz = float(state.target.z - state.bot.z)
+    target_distance = float(np.sqrt(dx * dx + dy * dy + dz * dz))
+
+    # These deltas are computed for live-tick continuity and can be exposed later if needed.
+    previous_entry = state_buffers.get(state.bot_id, [])
+    if previous_entry:
+        previous_state = previous_entry[-1]["raw_state"]
+        delta_yaw = _calculate_wrapped_yaw_delta(float(state.bot.yaw), float(previous_state.bot.yaw))
+        delta_pitch = float(state.bot.pitch - previous_state.bot.pitch)
+    else:
+        delta_yaw = 0.0
+        delta_pitch = 0.0
+
+    feature_values = {
+        "health": float(state.bot.health),
+        "foodLevel": float(state.bot.food),
+        "damageDealt": 0.0,
+        "velX": float(state.bot.vel_x),
+        "velY": float(state.bot.vel_y),
+        "velZ": float(state.bot.vel_z),
+        "yaw": float(state.bot.yaw),
+        "pitch": float(state.bot.pitch),
+        "isOnGround": 1.0 if state.bot.is_on_ground else 0.0,
+        "targetDistance": target_distance,
+        "targetRelX": dx,
+        "targetRelY": dy,
+        "targetRelZ": dz,
+        "nearestProjectileDx": 0.0,
+        "nearestProjectileDy": 0.0,
+        "nearestProjectileDz": 0.0,
+        "targetYaw": float(state.target.yaw),
+        "targetPitch": float(state.target.pitch),
+        "targetVelX": float(state.target.vel_x),
+        "targetVelY": float(state.target.vel_y),
+        "targetVelZ": float(state.target.vel_z),
+        "targetHealth": float(state.target.health),
+    }
+    return [float(feature_values[name]) for name in INPUT_COLUMNS], delta_yaw, delta_pitch
 
 
 def _state_to_categorical_row(state: GameState) -> list[int]:
-    bag = list(state.inventoryBag)
+    bag = ["AIR"] * 27
     item_names = [
-        state.mainHandItem,
-        state.offHandItem,
-        state.hotbar0,
-        state.hotbar1,
-        state.hotbar2,
-        state.hotbar3,
-        state.hotbar4,
-        state.hotbar5,
-        state.hotbar6,
-        state.hotbar7,
-        state.hotbar8,
+        state.inventory.main_hand,
+        state.inventory.off_hand,
+        *state.inventory.hotbar,
         *bag,
     ]
 
     ids: list[int] = []
     for item_name in item_names:
         normalized = _normalize_item_name(str(item_name))
-        ids.append(int(item_vocabulary.get(normalized, unknown_item_id)))
+        ids.append(int(item_vocabulary.get(normalized, air_item_id)))
     return ids
 
 
 @app.on_event("startup")
 def startup_event() -> None:
-    global model, item_vocabulary, unknown_item_id
+    global model, item_vocabulary, air_item_id
 
     if not CHECKPOINT_PATH.exists():
         raise FileNotFoundError(f"Checkpoint not found: {CHECKPOINT_PATH}")
@@ -180,7 +177,7 @@ def startup_event() -> None:
         raise FileNotFoundError(f"Item vocabulary not found: {ITEM_VOCAB_PATH}")
 
     item_vocabulary = _load_item_vocabulary(ITEM_VOCAB_PATH)
-    unknown_item_id = int(item_vocabulary.get("UNKNOWN", 1))
+    air_item_id = int(item_vocabulary.get("AIR", item_vocabulary.get("", 0)))
 
     checkpoint_vocab_size = _infer_checkpoint_vocab_size(CHECKPOINT_PATH)
     vocabulary_id_span = max(item_vocabulary.values(), default=0) + 1
@@ -205,23 +202,34 @@ def predict(state: GameState) -> BotPrediction:
     if model is None:
         raise HTTPException(status_code=503, detail="Model is not loaded")
 
+    continuous_row, delta_yaw, delta_pitch = _state_to_continuous_row(state)
+    categorical_row = _state_to_categorical_row(state)
+
     history = state_buffers.setdefault(state.bot_id, [])
-    history.append(state)
+    history.append(
+        {
+            "raw_state": state,
+            "continuous": continuous_row,
+            "categorical": categorical_row,
+            "deltaYaw": delta_yaw,
+            "deltaPitch": delta_pitch,
+        }
+    )
     if len(history) > WINDOW_SIZE:
         history.pop(0)
 
     # Left-pad short histories by repeating the first observed frame.
-    window_frames = list(history)
-    if len(window_frames) < WINDOW_SIZE:
-        padding = [window_frames[0]] * (WINDOW_SIZE - len(window_frames))
-        window_frames = padding + window_frames
+    window_entries = list(history)
+    if len(window_entries) < WINDOW_SIZE:
+        padding = [window_entries[0]] * (WINDOW_SIZE - len(window_entries))
+        window_entries = padding + window_entries
 
     continuous_window = np.asarray(
-        [_state_to_continuous_row(frame) for frame in window_frames],
+        [entry["continuous"] for entry in window_entries],
         dtype=np.float32,
     )
     categorical_window = np.asarray(
-        [_state_to_categorical_row(frame) for frame in window_frames],
+        [entry["categorical"] for entry in window_entries],
         dtype=np.int32,
     )
 
