@@ -218,3 +218,79 @@ Output format:
 - The script ends with `Completed <N> scenario checks with <M> failure(s).`.
 - Without `--allow-failures`, any failed scenario raises an assertion and returns a non-zero exit code.
 
+## Inference REST API
+
+Run the FastAPI server that serves Phase 4 model predictions:
+
+```bash
+uv run python3 scripts/run_inference_api.py
+```
+
+Default server URL:
+
+- `http://127.0.0.1:8000`
+- Prediction endpoint: `POST http://127.0.0.1:8000/predict`
+
+Before starting the API, make sure these files exist:
+
+- `models/checkpoints/phase4_best_weights.npz`
+- `models/exports/phase2_item_vocabulary.json`
+
+Quick local health check:
+
+```bash
+curl http://127.0.0.1:8000/docs
+```
+
+Quick prediction request example:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/predict" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "bot_id": "bot-1",
+    "bot": {
+      "x": 0.0,
+      "y": 64.0,
+      "z": 0.0,
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "vel_x": 0.0,
+      "vel_y": 0.0,
+      "vel_z": 0.0,
+      "health": 20.0,
+      "food": 20.0,
+      "is_on_ground": true
+    },
+    "target": {
+      "x": 2.0,
+      "y": 64.0,
+      "z": 2.0,
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "vel_x": 0.0,
+      "vel_y": 0.0,
+      "vel_z": 0.0,
+      "health": 20.0,
+      "food": 20.0,
+      "is_on_ground": true
+    },
+    "inventory": {
+      "main_hand": "DIAMOND_SWORD",
+      "off_hand": "AIR",
+      "hotbar": [
+        "DIAMOND_SWORD",
+        "SPLASH_POTION",
+        "POTION",
+        "COOKED_BEEF",
+        "GOLDEN_APPLE",
+        "AIR",
+        "AIR",
+        "AIR",
+        "AIR"
+      ]
+    }
+  }'
+```
+
+The API keeps a rolling 20-frame buffer per `bot_id` and returns one action prediction payload per request.
