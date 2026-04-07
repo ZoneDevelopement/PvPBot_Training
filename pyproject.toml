@@ -9,10 +9,13 @@ description = "PvP bot AI model training scaffold"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.115",
     "mlx>=0.31.1",
     "numpy>=1.26",
     "pandas>=2.0",
+    "pydantic>=2.12.5",
     "pytest>=9.0.2",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
