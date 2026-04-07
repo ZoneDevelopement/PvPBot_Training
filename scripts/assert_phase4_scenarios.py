@@ -52,6 +52,7 @@ class ScenarioRunner:
         self.food_item_id = self._item_id("COOKED_BEEF")
         self.golden_apple_item_id = self._item_id("GOLDEN_APPLE")
         self.sword_item_id = self._item_id("DIAMOND_SWORD")
+        self.filler_item_id = self._item_id("OBSIDIAN")
 
     def _item_id(self, item_name: str) -> int:
         item_id = self.item_vocabulary.get(item_name)
@@ -66,6 +67,8 @@ class ScenarioRunner:
     def make_neutral_window(self) -> tuple[np.ndarray, np.ndarray]:
         continuous_window = np.zeros((WINDOW_SIZE, len(INPUT_COLUMNS)), dtype=np.float32)
         categorical_window = np.zeros((WINDOW_SIZE, INVENTORY_SLOT_COUNT), dtype=np.int32)
+        categorical_window.fill(self.filler_item_id)
+        self._set_inventory_item(categorical_window, 0, self.sword_item_id)
         self._set_inventory_item(categorical_window, 2, self.sword_item_id)
         self._set(continuous_window, "health", 20.0, final_only=False)
         self._set(continuous_window, "foodLevel", 20.0, final_only=False)
@@ -153,9 +156,10 @@ class ScenarioRunner:
 
     def scenario_melee_combat(self) -> ScenarioResult:
         continuous_window, categorical_window = self.make_neutral_window()
-        self._set(continuous_window, "targetDistance", 2.0)
+        closing_distance = np.linspace(6.0, 2.0, WINDOW_SIZE, dtype=np.float32)
+        continuous_window[:, self.feature_index["targetDistance"]] = closing_distance
         self._set(continuous_window, "targetRelX", 0.0)
-        self._set(continuous_window, "targetRelZ", 2.0)
+        continuous_window[:, self.feature_index["targetRelZ"]] = closing_distance
         self._set(continuous_window, "velZ", 0.2)
         self._set(continuous_window, "targetVelZ", -0.2)
         out = self._predict(continuous_window, categorical_window)
@@ -182,8 +186,9 @@ class ScenarioRunner:
 
     def scenario_obstacle_jumping(self) -> ScenarioResult:
         continuous_window, categorical_window = self.make_neutral_window()
-        self._set(continuous_window, "targetDistance", 1.0)
+        self._set(continuous_window, "targetDistance", 1.414)
         self._set(continuous_window, "targetRelY", 1.0)
+        self._set(continuous_window, "targetRelZ", 1.0)
         self._set(continuous_window, "velZ", 0.2, final_only=False)
         self._set(continuous_window, "velZ", 0.0, final_only=True)
         out = self._predict(continuous_window, categorical_window)
@@ -194,8 +199,9 @@ class ScenarioRunner:
 
     def scenario_drinking_potion(self) -> ScenarioResult:
         continuous_window, categorical_window = self.make_neutral_window()
-        self._set(continuous_window, "health", 4.0)
+        continuous_window[:, self.feature_index["health"]] = np.linspace(10.0, 4.0, WINDOW_SIZE, dtype=np.float32)
         self._set(continuous_window, "targetDistance", 30.0)
+        self._set_inventory_item(categorical_window, 0, self.potion_item_id)
         self._set_hotbar_item(categorical_window, self.args.drink_slot, self.potion_item_id)
         out = self._predict(continuous_window, categorical_window)
 
@@ -213,6 +219,7 @@ class ScenarioRunner:
         self._set(continuous_window, "health", 12.0)
         self._set(continuous_window, "targetDistance", 6.0)
         self._set(continuous_window, "targetRelX", 2.0)
+        self._set_inventory_item(categorical_window, 0, self.splash_potion_item_id)
         self._set_hotbar_item(categorical_window, self.args.splash_slot, self.splash_potion_item_id)
         out = self._predict(continuous_window, categorical_window)
 
@@ -228,8 +235,9 @@ class ScenarioRunner:
 
     def scenario_splash_potion_self_heal(self) -> ScenarioResult:
         continuous_window, categorical_window = self.make_neutral_window()
-        self._set(continuous_window, "health", 2.0, final_only=False)
+        continuous_window[:, self.feature_index["health"]] = np.linspace(8.0, 2.0, WINDOW_SIZE, dtype=np.float32)
         self._set(continuous_window, "targetDistance", 3.0)
+        self._set_inventory_item(categorical_window, 0, self.splash_potion_item_id)
         self._set_hotbar_item(categorical_window, self.args.splash_slot, self.splash_potion_item_id)
         out = self._predict(continuous_window, categorical_window)
 
@@ -254,8 +262,9 @@ class ScenarioRunner:
         self._expect_feature("foodLevel", "food_level_signal")
 
         continuous_window, categorical_window = self.make_neutral_window()
-        self._set(continuous_window, "health", 13.0)
+        continuous_window[:, self.feature_index["health"]] = np.linspace(18.0, 13.0, WINDOW_SIZE, dtype=np.float32)
         self._set(continuous_window, "targetDistance", 25.0)
+        self._set_inventory_item(categorical_window, 0, self.food_item_id)
         self._set_hotbar_item(categorical_window, self.args.food_slot, self.food_item_id)
         out = self._predict(continuous_window, categorical_window)
 
@@ -274,6 +283,7 @@ class ScenarioRunner:
         if idx is not None:
             continuous_window[:, idx] = np.linspace(30.0, 10.0, WINDOW_SIZE, dtype=np.float32)
         self._set(continuous_window, "targetVelZ", -1.0)
+        self._set_inventory_item(categorical_window, 0, self.golden_apple_item_id)
         self._set_hotbar_item(categorical_window, self.args.golden_apple_slot, self.golden_apple_item_id)
         out = self._predict(continuous_window, categorical_window)
 
@@ -291,13 +301,13 @@ class ScenarioRunner:
 
         first_continuous, first_categorical = self.make_neutral_window()
         self._set(first_continuous, "targetDistance", 2.0)
-        self._set(first_continuous, "targetRelZ", 1.0)
+        self._set(first_continuous, "targetRelZ", 2.0)
         self._set(first_continuous, "targetHealth", 20.0)
         out1 = self._predict(first_continuous, first_categorical)
 
         second_continuous, second_categorical = self.make_neutral_window()
         self._set(second_continuous, "targetDistance", 2.5)
-        self._set(second_continuous, "targetRelZ", 1.0)
+        self._set(second_continuous, "targetRelZ", 2.5)
         self._set(second_continuous, "targetHealth", 18.0)
         out2 = self._predict(second_continuous, second_categorical)
 
@@ -324,11 +334,13 @@ class ScenarioRunner:
         first_continuous, first_categorical = self.make_neutral_window()
         self._set(first_continuous, "targetDistance", 2.0)
         self._set(first_continuous, "targetRelX", -1.0)
+        self._set(first_continuous, "targetRelZ", 1.732)
         out1 = self._predict(first_continuous, first_categorical)
 
         second_continuous, second_categorical = self.make_neutral_window()
         self._set(second_continuous, "targetDistance", 2.0)
         self._set(second_continuous, "targetRelX", 1.0)
+        self._set(second_continuous, "targetRelZ", 1.732)
         out2 = self._predict(second_continuous, second_categorical)
 
         lmb1 = self._bin(out1, "inputLmb")
